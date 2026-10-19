@@ -1,0 +1,13 @@
+.DS_Store
+/node_modules
+/.next
+/out
+/build
+*.tsbuildinfo
+next-env.d.ts
+
+# Local data + secrets (SQLite + Spotify tokens live here; server-only)
+/data
+.env
+.env.local
+.env*.local

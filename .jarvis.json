@@ -1,0 +1,9 @@
+{
+  "id": "music-kiosk",
+  "name": "Music Kiosk",
+  "category": "standalone",
+  "description": "Party jukebox: a Spotify playlist backdrop with a kiosk-owned Up Next queue (search all of Spotify, play next), guest song requests by QR code, and Soundboard clips that pause or play over the music. Runs in any browser — laptop, iPad, phone.",
+  "tech": ["Next.js 16", "React 19", "TypeScript", "Tailwind CSS v4", "SQLite (better-sqlite3)", "Spotify Web API + Web Playback SDK"],
+  "status": { "prod": "planned", "dev": "local" },
+  "deploy": { "prod": { "port": 4860 }, "dev": { "port": 4870 } }
+}

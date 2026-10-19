@@ -1,0 +1,112 @@
+@import "tailwindcss";
+
+/* ============================================================================
+   Music Kiosk — dark "party" shell. Colour tokens are Tailwind theme colours
+   (bg-card, text-muted, border-line, text-accent …) so components stay in
+   utilities; the few reusable pieces (buttons, chips, pads) live below.
+   ========================================================================== */
+
+@theme {
+  --color-bg: #0e0d13;
+  --color-card: #18161f;
+  --color-ink: #f3f1f8;
+  --color-muted: #9b97a8;
+  --color-line: #2a2734;
+  --color-accent: #c084fc;
+}
+
+:root {
+  --accent: #c084fc;
+  color-scheme: dark;
+}
+
+html, body { padding: 0; margin: 0; }
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  background: var(--color-bg);
+  color: var(--color-ink);
+  min-height: 100dvh;
+  -webkit-font-smoothing: antialiased;
+  -webkit-tap-highlight-color: transparent;
+}
+
+button { cursor: pointer; }
+button:disabled { cursor: default; opacity: 0.35; }
+
+.card {
+  background: var(--color-card);
+  border: 1px solid var(--color-line);
+  border-radius: 1rem;
+}
+
+.section-title {
+  @apply mb-2 text-sm font-semibold uppercase tracking-wider text-muted;
+}
+
+.art {
+  @apply flex items-center justify-center overflow-hidden rounded-lg bg-line text-2xl text-muted;
+}
+
+.input {
+  @apply w-full rounded-xl border border-line bg-bg px-4 py-2.5 text-ink outline-none placeholder:text-muted focus:border-accent;
+}
+
+.btn {
+  @apply inline-flex items-center justify-center whitespace-nowrap rounded-lg border border-line px-3 py-1.5 text-sm font-medium hover:bg-line;
+}
+.btn-primary {
+  @apply border-transparent bg-accent text-bg hover:bg-accent/85;
+}
+
+.btn-round {
+  @apply flex h-11 w-11 items-center justify-center rounded-full bg-line text-lg hover:bg-line/70;
+}
+.btn-round-lg {
+  @apply h-14 w-14 text-2xl;
+}
+.btn-round-lg:not(.text-xl) { @apply bg-accent text-bg hover:bg-accent/85; }
+
+.icon-btn {
+  @apply flex h-8 w-8 items-center justify-center rounded-md text-sm text-muted hover:bg-line hover:text-ink;
+}
+
+.chip {
+  @apply inline-flex items-center gap-1 rounded-full border border-line px-3 py-1 text-sm hover:bg-line;
+}
+.chip-on { @apply border-accent text-accent; }
+
+.tab {
+  @apply relative rounded-lg px-3 py-1.5 text-sm text-muted hover:text-ink;
+}
+.tab-on { @apply bg-line text-ink; }
+
+.badge {
+  @apply ml-1 inline-flex min-w-[1.1rem] items-center justify-center rounded-full bg-accent px-1 text-[10px] font-semibold text-bg;
+}
+
+/* Sound pads: colour comes from --pad (Soundboard accent). */
+.pad {
+  @apply flex aspect-[4/3] items-center justify-center rounded-2xl p-3 text-center text-base font-semibold;
+  background: color-mix(in srgb, var(--pad) 18%, var(--color-card));
+  border: 1px solid color-mix(in srgb, var(--pad) 45%, transparent);
+  color: color-mix(in srgb, var(--pad) 70%, white);
+  transition: transform 80ms ease;
+}
+.pad:active { transform: scale(0.96); }
+.pad-playing {
+  background: color-mix(in srgb, var(--pad) 40%, var(--color-card));
+  box-shadow: 0 0 0 3px var(--pad);
+}
+
+/* DEV environment banner (amber) — only rendered off the prod port. */
+.env-banner {
+  background: #f8e3b0;
+  color: #6b4a06;
+  text-align: center;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  padding: 6px 10px;
+  text-transform: uppercase;
+}
