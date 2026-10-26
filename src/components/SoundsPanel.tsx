@@ -128,7 +128,7 @@ export function SoundsPanel({ state, notify }: { state: KioskState; notify: Noti
         .catch((e) => notify(e.message));
       return;
     }
-    const note = await startClip(s.id, s.key, liveMode);
+    const note = await startClip(s.id, s.key, liveMode, fades[s.id]?.in ? fadeInMs : 0);
     if (note) notify(note);
   };
 

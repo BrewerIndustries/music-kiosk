@@ -207,6 +207,7 @@ export async function startClip(
   const existing = handles.get(id);
   if (existing) {
     existing.audio.currentTime = 0;
+    if (fadeInMs > 0) existing.fader.set(0); // a faded restart rises from silence
     resumeClip(id, fadeInMs);
     return null;
   }

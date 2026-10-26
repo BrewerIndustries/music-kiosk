@@ -64,7 +64,8 @@ It's a responsive web app: every feature works on a **laptop, iPad, or phone**. 
   follows changes made elsewhere (Spotify app, device buttons). Ducking lowers the
   music to *Settings ▸ duck %* of it; failed restores retry, and a watchdog
   restores after 3 min if a duck is ever left on. Clip volume is a Web Audio master gain.
-- **Sound cards:** tapping a card fires it in the selected mode (restarts it if
+- **Sound cards:** tapping a card fires it in the selected mode (restarts it if live;
+  fades in when the card's fade-in toggle is on);
   live); its button row is ▶/⏸, ■ stop, and two fade toggles (lit = on, kept per
   sound per device in `kiosk.padFades`): with fade-in on, ▶ fades the clip in (from
   stopped or paused); with fade-out on, ■ fades it out, and a second ■ stops at once.
