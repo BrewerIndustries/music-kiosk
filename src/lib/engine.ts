@@ -891,12 +891,15 @@ async function runTransition(uri: string, remaining: number, ms: number) {
 // Fade the music out (then pause, and put the volume back for next time) or in
 // (from silence if paused, else from wherever it is, up to the music volume).
 // Runs in the background; on players without volume control it just pauses/plays.
-export async function fadeMusic(dir: "in" | "out"): Promise<"fading" | "instant"> {
+// cueNext (fade out only): then line up the next song, paused at its start, so ▶
+// begins it fresh.
+export async function fadeMusic(dir: "in" | "out", cueNext = false): Promise<"fading" | "instant"> {
   const s = state();
   const dev = s.playback?.device;
   const { musicFadeInMs, musicFadeOutMs } = getSettings();
   if (!dev?.supports_volume) {
     await api("PUT", dir === "out" ? "/me/player/pause" : "/me/player/play");
+    if (dir === "out" && cueNext) await cueNextPaused();
     if (dir === "out") markStopped();
     poke();
     return "instant";
@@ -910,6 +913,7 @@ export async function fadeMusic(dir: "in" | "out"): Promise<"fading" | "instant"
       if (dir === "out") {
         if (await ramp(current, 0, musicFadeOutMs)) {
           await api("PUT", "/me/player/pause");
+          if (cueNext) await cueNextPaused();
           markStopped();
           await applyVolume(base);
         }
@@ -931,6 +935,26 @@ export async function fadeMusic(dir: "in" | "out"): Promise<"fading" | "instant"
   };
   void run();
   return "fading";
+}
+
+// Skip to the next song (Up Next's head track first, else the playlist) and leave it
+// paused at 0:00. Spotify starts playing on `next`, so wait for the change and pause.
+// The music is silent (faded out) while this runs. A YouTube / clip head still plays
+// at the end of the cued song, as usual.
+async function cueNextPaused() {
+  const s = state();
+  const was = s.playback?.item?.uri;
+  const dev = s.playback?.device?.id ?? undefined;
+  const h = head();
+  if (h?.kind === "track" && h.uri && !s.memory.handoff) await handOff(h.id, h.uri, dev);
+  await api("POST", "/me/player/next", undefined, { device_id: dev });
+  for (const until = Date.now() + 4000; Date.now() < until; ) {
+    await new Promise((r) => setTimeout(r, 300));
+    const pb = await getPlayback().catch(() => null);
+    if (pb?.item && pb.item.uri !== was) break;
+  }
+  await api("PUT", "/me/player/pause", undefined, { device_id: dev }).catch(() => {});
+  await api("PUT", "/me/player/seek", undefined, { position_ms: "0", device_id: dev }).catch(() => {});
 }
 
 // Snapshot for the UI.

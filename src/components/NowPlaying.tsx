@@ -23,6 +23,23 @@ export function NowPlaying({ state, notify, sdkDeviceId }: Props) {
     return () => clearInterval(t);
   }, []);
 
+  // Fade toggles (per screen, like the sound cards): on = ▶ fades in, and ⏸ fades
+  // out then cues the next song, paused at its start.
+  const [fades, setFades] = useState<{ in?: boolean; out?: boolean }>({});
+  useEffect(() => {
+    try {
+      setFades(JSON.parse(localStorage.getItem("kiosk.musicFades") ?? "{}"));
+    } catch {}
+  }, []);
+  const toggleFade = (dir: "in" | "out") =>
+    setFades((prev) => {
+      const next = { ...prev, [dir]: !prev[dir] };
+      try {
+        localStorage.setItem("kiosk.musicFades", JSON.stringify(next));
+      } catch {}
+      return next;
+    });
+
   // What a tap just asked for, shown at once and held until Spotify agrees (or
   // for a few seconds, after which Spotify's word wins).
   const [want, setWant] = useState<(Expectation & { at: number }) | null>(null);
@@ -212,31 +229,39 @@ export function NowPlaying({ state, notify, sdkDeviceId }: Props) {
       <div className="mt-3 flex items-center justify-center gap-2">
         <button className="btn-round" aria-label="Previous" onClick={() => act("previous")}>⏮</button>
         <button
-          className="btn-round"
-          aria-label="Fade in"
-          title={`Fade in (${((state.settings?.musicFadeInMs ?? 3000) / 1000).toFixed(1)} s)`}
-          disabled={state.fading}
-          onClick={() => (pb?.track ? act("fadeIn") : startPlaylist())}
+          className="btn-round fade-toggle"
+          aria-label="Fade in on play"
+          aria-pressed={Boolean(fades.in)}
+          title={`Fade in on ▶ (${((state.settings?.musicFadeInMs ?? 3000) / 1000).toFixed(1)} s): ${fades.in ? "on" : "off"}`}
+          onClick={() => toggleFade("in")}
         >
           <FadeIcon dir="in" />
         </button>
         {isPlaying ? (
-          <button className="btn-round btn-round-lg" aria-label="Pause" onClick={() => act("pause")}>⏸</button>
+          <button
+            className="btn-round btn-round-lg"
+            aria-label={fades.out ? "Fade out" : "Pause"}
+            disabled={state.fading}
+            onClick={() => (fades.out ? act("fadeOut", { cueNext: true }) : act("pause"))}
+          >
+            ⏸
+          </button>
         ) : (
           <button
             className="btn-round btn-round-lg"
-            aria-label="Play"
-            onClick={() => (pb?.track ? act("play") : startPlaylist())}
+            aria-label={fades.in ? "Fade in" : "Play"}
+            disabled={state.fading}
+            onClick={() => (!pb?.track ? startPlaylist() : act(fades.in ? "fadeIn" : "play"))}
           >
             ▶
           </button>
         )}
         <button
-          className="btn-round"
-          aria-label="Fade out"
-          title={`Fade out (${((state.settings?.musicFadeOutMs ?? 5000) / 1000).toFixed(1)} s)`}
-          disabled={!isPlaying || state.fading}
-          onClick={() => act("fadeOut")}
+          className="btn-round fade-toggle"
+          aria-label="Fade out on pause"
+          aria-pressed={Boolean(fades.out)}
+          title={`Fade out on ⏸ (${((state.settings?.musicFadeOutMs ?? 5000) / 1000).toFixed(1)} s), then cue the next song paused: ${fades.out ? "on" : "off"}`}
+          onClick={() => toggleFade("out")}
         >
           <FadeIcon dir="out" />
         </button>

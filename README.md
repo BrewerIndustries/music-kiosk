@@ -73,9 +73,12 @@ It's a responsive web app: every feature works on a **laptop, iPad, or phone**. 
   master gain for the Sounds volume), which also makes volume/fades work on iOS. A
   clip holds the music (paused or ducked) until it's stopped or ends; pausing a
   clip keeps the hold.
-- **Music fades:** ⏮ [fade in] ▶/⏸ [fade out] ⏭. Fade out ramps to silence, pauses,
-  and puts the volume back; fade in starts from silence if paused. Durations in
-  *Settings ▸ Music*.
+- **Music fades:** ⏮ [fade in] ▶/⏸ [fade out] ⏭. The two fade buttons are toggles
+  (per screen, localStorage `kiosk.musicFades`, like the sound cards'). Fade in on:
+  ▶ starts from silence and ramps up. Fade out on: ⏸ ramps to silence, pauses, then
+  **cues the next song paused at 0:00** (Up Next's head track first, else the
+  playlist; `fadeOut {cueNext}` → `cueNextPaused()`), and puts the volume back, so
+  the next ▶ starts a fresh song. Durations in *Settings ▸ Music*.
 - **Playlist rows** (Up Next ▸ "Then from …"): ▶ play now, ⏸ load it paused at 0:00
   (muted for the jump, then volume restored), ⤒ copy to the top of Up Next (it will
   still play again when the playlist reaches it).

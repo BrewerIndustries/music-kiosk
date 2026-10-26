@@ -28,7 +28,7 @@ export const dynamic = "force-dynamic";
 // POST /api/player { action, ... } — transport controls + clip helpers.
 //   play | pause | next | previous | volume {percent} | restoreVolume | shuffle {on}
 //   transfer {deviceId, play?, browser?} | startPlaylist {deviceId?, paused?}
-//   fadeIn | fadeOut   (music)  ·  resumeOn {deviceId?}  ·  releaseHolds
+//   fadeIn | fadeOut {cueNext?}  (music; cueNext leaves the next song paused)  ·  resumeOn {deviceId?}  ·  releaseHolds
 //   skipTo {uri, index, paused?}   (jump to a track in the upcoming playlist list;
 //                                   paused cues it up without playing)
 //   duck | unduck | instantPause | instantResume   (used around instant clips)
@@ -78,7 +78,7 @@ export function POST(req: NextRequest) {
         break;
       case "fadeIn":
       case "fadeOut":
-        result = { mode: await fadeMusic(b.action === "fadeIn" ? "in" : "out") };
+        result = { mode: await fadeMusic(b.action === "fadeIn" ? "in" : "out", b.cueNext === true) };
         break;
       case "resumeOn":
         result = { resumed: await resumeOn(deviceId) };
