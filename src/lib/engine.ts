@@ -2,7 +2,7 @@
 // playback, asks engine-core's decide() what to do, and does it. The kiosk UI reads
 // the cached snapshot from here instead of hitting Spotify itself.
 import { api, getPlayback, isConnected, summarize, SpotifyError, type SpPlayback, type SpTrack, type TrackSummary } from "./spotify";
-import { decide, initialMemory, type Memory } from "./engine-core";
+import { CLIP_CUT_MS, decide, initialMemory, type Memory } from "./engine-core";
 import { logError, recentErrors } from "./log";
 import { getSettings, updateSettings } from "./settings";
 import { getItem, head, moveToFront, playsInBrowser, setStatus, upNext, type QueueItem } from "./queue";
@@ -531,10 +531,10 @@ function clipOverdue(c: { id: string; startedAt: number }) {
 }
 
 // Hand a clip / YouTube song to the audio host (Spotify is already paused).
-async function startInBrowser(id: string) {
+async function startInBrowser(id: string, resume = false) {
   const s = state();
   setStatus(id, "handed_off");
-  s.memory = { ...s.memory, clip: { id, startedAt: Date.now() } };
+  s.memory = { ...s.memory, clip: { id, startedAt: Date.now(), resume } };
   if (!hostAlive()) await finishClip(id); // nobody to play it: skip it
 }
 
@@ -542,8 +542,16 @@ async function startInBrowser(id: string) {
 export async function finishClip(id: string) {
   const s = state();
   if (s.memory.clip?.id !== id) return;
+  const resume = Boolean(s.memory.clip.resume);
   setStatus(id, "played");
   s.memory = { ...s.memory, clip: null };
+  // It cut into a Spotify song (▶ Now): carry on with that song; the rest of Up
+  // Next follows it as usual.
+  if (resume) {
+    await api("PUT", "/me/player/play").catch(() => {});
+    poke();
+    return;
+  }
   // Another browser item next (e.g. a run of YouTube songs): play it straight away
   // and keep Spotify waiting.
   const next = head();
@@ -568,13 +576,18 @@ export async function playNow(id: string) {
   if (!item || item.status !== "queued") return;
   moveToFront(id);
   if (playsInBrowser(item.kind)) {
+    // Interrupting a song (not just its last moments): resume it afterwards. A
+    // browser item already playing passes its own resume point on.
+    const pb = s.playback;
+    const left = pb?.item ? pb.item.duration_ms - (pb.progress_ms ?? 0) : 0;
+    const midSong = s.memory.clip?.resume || Boolean(pb?.is_playing && left > CLIP_CUT_MS + 3000);
     await api("PUT", "/me/player/pause").catch(() => {});
     // Replacing a browser item that's already playing: it counts as played.
     if (s.memory.clip) {
       setStatus(s.memory.clip.id, "played");
       s.memory = { ...s.memory, clip: null };
     }
-    await startInBrowser(id);
+    await startInBrowser(id, midSong);
     poke();
     return;
   }

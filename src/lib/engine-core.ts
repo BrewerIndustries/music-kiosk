@@ -25,7 +25,9 @@ export type Memory = {
   // A track we've put in Spotify's queue that hasn't started yet.
   handoff: { id: string; uri: string; trackChanges: number } | null;
   // A queued clip / YouTube song the browser is playing while Spotify is paused.
-  clip: { id: string; startedAt: number } | null;
+  // `resume`: it interrupted a Spotify song mid-way (▶ Now), so pick that song back
+  // up afterwards instead of skipping to the next one.
+  clip: { id: string; startedAt: number; resume?: boolean } | null;
   // Up Next item currently playing on Spotify (for "requested by" display).
   nowPlayingId: string | null;
 };

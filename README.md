@@ -140,7 +140,9 @@ It's a responsive web app: every feature works on a **laptop, iPad, or phone**. 
   YouTube's embedded IFrame player ([src/lib/youtubePlayer.ts](src/lib/youtubePlayer.ts),
   visible ≥200×200 as YouTube requires — no audio-only playback), and reports back;
   a run of YouTube songs plays back to back, then Spotify resumes. ⏭ skips the
-  YouTube song; Spotify's ▶ ends it and goes back to Spotify. Volume follows the
+  YouTube song (instantly on the kiosk screen); Spotify's ▶ ends it and goes back to
+  Spotify. A YouTube song started with ▶ Now mid-song resumes the interrupted Spotify
+  song afterwards (`memory.clip.resume`) instead of skipping it. Volume follows the
   music volume; Pause & play / Play over sounds hold the YouTube song like Spotify.
   If the browser blocks autoplay (iOS), the player shows *Tap to play*. Videos that
   can't be embedded are filtered out. Guests stay Spotify-only but see YouTube songs

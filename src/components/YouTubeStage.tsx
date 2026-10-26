@@ -61,10 +61,14 @@ export function YouTubeStage({ state, notify }: { state: KioskState; notify: Not
   const positionMs = host ? yt.positionMs : now ? Math.max(0, tick - now.startedAt) : 0;
   const pct = durationMs ? Math.min(100, (positionMs / durationMs) * 100) : 0;
 
-  const skip = () =>
+  // On the kiosk screen, stop the video at once; ending it reports the song done
+  // (the same path as a song finishing). Elsewhere, ask the server to skip it.
+  const skip = () => {
+    if (host && yt.videoId) return void skipYouTube();
     call("POST", "/api/player", { action: "next" })
       .then(() => notify("Skipped"))
       .catch((e) => notify(e.message));
+  };
 
   const showing = Boolean(now) || (host && Boolean(yt.videoId));
   return (
