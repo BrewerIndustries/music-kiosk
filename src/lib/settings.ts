@@ -20,6 +20,7 @@ export type KioskSettings = {
   partyCode: string; // in the guest link; rotate to lock old QR codes out
   previousPartyCode: string | null; // the code before the last change, to put back printed QR codes
   guestBaseUrl: string | null; // override for the QR link (e.g. the public guest site)
+  youtubeEnabled: boolean; // YouTube search/playlists on the kiosk (off = Spotify only)
 };
 
 function randomCode() {
@@ -58,6 +59,7 @@ export function getSettings(): KioskSettings {
     partyCode,
     previousPartyCode: getSetting("party_code_prev"),
     guestBaseUrl: getSetting("guest_base_url"),
+    youtubeEnabled: getSetting("youtube_enabled") === "1",
   };
 }
 
@@ -79,6 +81,7 @@ export function updateSettings(p: Record<string, unknown>) {
     if (typeof p[k] === "number") setSetting(col, String(Math.max(100, Math.min(30_000, Math.round(p[k] as number)))));
   if (typeof p.songTransitionMs === "number")
     setSetting("song_transition_ms", String(Math.max(0, Math.min(12_000, Math.round(p.songTransitionMs)))));
+  if (typeof p.youtubeEnabled === "boolean") setSetting("youtube_enabled", p.youtubeEnabled ? "1" : "0");
   if (typeof p.requireApproval === "boolean") setSetting("require_approval", p.requireApproval ? "1" : "0");
   if (typeof p.guestRequestsOpen === "boolean") setSetting("guest_open", p.guestRequestsOpen ? "1" : "0");
   if (typeof p.guestBlockDuplicates === "boolean") setSetting("guest_block_dupes", p.guestBlockDuplicates ? "1" : "0");

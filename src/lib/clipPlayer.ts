@@ -12,6 +12,7 @@
 //           to pause), restore it afterwards
 //   over  — leave the music alone (Play over with "Lower the music" off)
 import { call } from "./client";
+import { youtubeHold } from "./youtubePlayer";
 
 export type ClipMode = "pause" | "duck" | "over"; // over = play over the music untouched
 export type ClipStatus = "stopped" | "playing" | "paused" | "fading-in" | "fading-out";
@@ -101,6 +102,9 @@ type Hold = { release: () => Promise<void>; note: string | null };
 
 async function acquireHold(mode: ClipMode): Promise<Hold> {
   if (mode === "over") return { note: null, release: async () => {} };
+  // A YouTube song playing in this tab is the music right now (Spotify is paused).
+  const yt = youtubeHold(mode);
+  if (yt) return { note: null, release: yt.release };
   if (mode === "duck") {
     const { method } = await call<{ method: string }>("POST", "/api/player", { action: "duck" }).catch(() => ({
       method: "unsupported",

@@ -194,7 +194,7 @@ function Row({
         className="group flex min-w-0 flex-1 items-center gap-3 text-left disabled:opacity-100"
       >
         <div className="art relative h-10 w-10 shrink-0 text-base">
-          {item.art ? <img src={item.art} alt="" className="h-full w-full object-cover" /> : <span>{item.kind === "clip" ? "🔊" : "♪"}</span>}
+          {item.art ? <img src={item.art} alt="" className="h-full w-full object-cover" /> : <span>{item.kind === "clip" ? "🔊" : item.kind === "youtube" ? "▶" : "♪"}</span>}
           {!locked && (
             <span className="absolute inset-0 hidden items-center justify-center bg-black/50 text-white group-hover:flex">▶</span>
           )}
@@ -202,6 +202,7 @@ function Row({
         <div className="min-w-0 flex-1">
           <div className="truncate text-sm font-medium">{item.title}</div>
           <div className="truncate text-xs text-muted">
+            {item.kind === "youtube" && <span className="mr-1 rounded bg-red-600/80 px-1 text-[10px] font-semibold text-white">YouTube</span>}
             {item.kind === "clip" ? "Sound clip" : item.subtitle}
             {item.requestedBy ? ` · ${item.requestedBy}` : ""}
             {item.durationMs ? ` · ${fmtTime(item.durationMs)}` : ""}
@@ -209,7 +210,7 @@ function Row({
         </div>
       </button>
       {locked ? (
-        <span className="text-xs text-accent">{item.kind === "clip" ? "playing" : "next"}</span>
+        <span className="text-xs text-accent">{item.kind === "track" ? "next" : "playing"}</span>
       ) : (
         <div className="flex shrink-0 items-center gap-1">
           <button className="icon-btn" aria-label="Play now" title="Play now" onClick={onPlayNow}>▶</button>

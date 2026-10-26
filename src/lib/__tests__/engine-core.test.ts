@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CLIP_CUT_MS, decide, HANDOFF_MS, initialMemory, type Memory, type PlaybackSnapshot } from "../engine-core";
+import { CLIP_CUT_MS, decide, HANDOFF_MS, initialMemory, type HeadItem, type Memory, type PlaybackSnapshot } from "../engine-core";
 
 const pb = (uri: string, progressMs: number, durationMs = 200_000, isPlaying = true): PlaybackSnapshot => ({
   isPlaying,
@@ -10,7 +10,7 @@ const pb = (uri: string, progressMs: number, durationMs = 200_000, isPlaying = t
 const track = (id: string, uri = `spotify:track:${id}`) => ({ id, kind: "track" as const, uri });
 const clip = (id: string) => ({ id, kind: "clip" as const, uri: null });
 
-function run(steps: [PlaybackSnapshot | null, ReturnType<typeof track> | ReturnType<typeof clip> | null][]) {
+function run(steps: [PlaybackSnapshot | null, HeadItem | null][]) {
   let mem: Memory = initialMemory();
   const all = [];
   for (const [p, h] of steps) {
@@ -92,6 +92,18 @@ describe("decide", () => {
     expect(all[1].actions).toEqual([{ type: "pauseForClip", id: "c" }]);
     expect(all[2].actions).toEqual([]);
     expect(mem.clip?.id).toBe("c");
+  });
+
+  it("treats a YouTube song like a clip: never handed to Spotify, pauses at the cut", () => {
+    const yt = (id: string) => ({ id, kind: "youtube" as const, uri: "youtube:video:dQw4w9WgXcQ" });
+    const { all, mem } = run([
+      [pb("A", 200_000 - HANDOFF_MS), yt("y")],
+      [pb("A", 200_000 - CLIP_CUT_MS), yt("y")],
+    ]);
+    expect(all[0].actions).toEqual([]);
+    expect(all[1].actions).toEqual([{ type: "pauseForClip", id: "y" }]);
+    expect(mem.handoff).toBe(null);
+    expect(mem.clip?.id).toBe("y");
   });
 
   it("does not act while paused", () => {

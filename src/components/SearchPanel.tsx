@@ -2,8 +2,45 @@
 import { useEffect, useState } from "react";
 import { call, fmtTime } from "@/lib/client";
 import type { KioskState, Notify, TrackSummary } from "./types";
+import { YouTubeSearch } from "./YouTubeSearch";
 
+// Spotify | YouTube tabs (YouTube only when it's connected and switched on).
 export function SearchPanel({ state, notify }: { state: KioskState; notify: Notify }) {
+  const ytOn = Boolean(state.settings?.youtubeEnabled && state.youtube?.connected);
+  const [source, setSourceState] = useState<"spotify" | "youtube">("spotify");
+  useEffect(() => {
+    try {
+      if (localStorage.getItem("kiosk.searchSource") === "youtube") setSourceState("youtube");
+    } catch {}
+  }, []);
+  const setSource = (v: "spotify" | "youtube") => {
+    setSourceState(v);
+    try {
+      localStorage.setItem("kiosk.searchSource", v);
+    } catch {}
+  };
+  const showYt = ytOn && source === "youtube";
+  return (
+    <section className="card p-4">
+      {ytOn && (
+        <div className="mb-3 grid grid-cols-2 gap-1 rounded-xl bg-line/40 p-1">
+          {(["spotify", "youtube"] as const).map((v) => (
+            <button
+              key={v}
+              onClick={() => setSource(v)}
+              className={`rounded-lg py-1.5 text-sm font-medium ${source === v ? "bg-accent text-white" : "text-muted"}`}
+            >
+              {v === "spotify" ? "Spotify" : "YouTube"}
+            </button>
+          ))}
+        </div>
+      )}
+      {showYt ? <YouTubeSearch state={state} notify={notify} /> : <SpotifySearch state={state} notify={notify} />}
+    </section>
+  );
+}
+
+function SpotifySearch({ state, notify }: { state: KioskState; notify: Notify }) {
   const [q, setQState] = useState("");
   useEffect(() => {
     try {
@@ -50,7 +87,7 @@ export function SearchPanel({ state, notify }: { state: KioskState; notify: Noti
       .catch((e) => notify(e.message));
 
   return (
-    <section className="card p-4">
+    <>
       <input
         type="search"
         value={q}
@@ -91,6 +128,6 @@ export function SearchPanel({ state, notify }: { state: KioskState; notify: Noti
           </div>
         ))}
       </div>
-    </section>
+    </>
   );
 }

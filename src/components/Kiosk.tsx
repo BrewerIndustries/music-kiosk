@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { call, KIOSK_CHANGED } from "@/lib/client";
 import { playQueuedClip, setClipVolume, unlockAudio } from "@/lib/clipPlayer";
+import { YouTubeStage } from "./YouTubeStage";
 import { useSpotifyPlayer } from "./useSpotifyPlayer";
 import { NowPlaying } from "./NowPlaying";
 import { UpNext } from "./UpNext";
@@ -117,11 +118,13 @@ export function Kiosk({ envLabel }: { envLabel: string | null }) {
 
   // OAuth errors come back as ?spotify_error=…
   useEffect(() => {
-    const err = new URLSearchParams(location.search).get("spotify_error");
-    if (err) {
-      notify(`Spotify: ${err}`);
-      history.replaceState(null, "", "/");
-    }
+    const q = new URLSearchParams(location.search);
+    const err = q.get("spotify_error");
+    const ytErr = q.get("youtube_error");
+    if (err) notify(`Spotify: ${err}`);
+    if (ytErr) notify(`YouTube: ${ytErr}`);
+    if (q.get("youtube") === "connected") notify("YouTube connected");
+    if (err || ytErr || q.has("youtube")) history.replaceState(null, "", "/");
   }, [notify]);
 
   const clipVolume = state?.settings?.clipVolume;
@@ -282,6 +285,7 @@ export function Kiosk({ envLabel }: { envLabel: string | null }) {
 
       <main className="mx-auto grid w-full max-w-7xl flex-1 gap-4 px-4 pb-24 pt-4 sm:px-6 sm:pb-8 lg:grid-cols-[minmax(340px,420px)_1fr]">
         <div className="space-y-4">
+          <YouTubeStage state={state} notify={notify} />
           <NowPlaying state={state} notify={notify} sdkDeviceId={sdk.deviceId} />
           <div className="hidden lg:block">
             <UpNext state={state} notify={notify} />

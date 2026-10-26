@@ -4,7 +4,8 @@
   // Default (top-level) env = PROD: musickiosk.dabrewer.dev. `--env dev` = DEV:
   // musickiosk-dev.dabrewer.dev.
   // Secrets (per env, `wrangler secret put <NAME> [--env dev]`):
-  //   SPOTIFY_CLIENT_ID, SPOTIFY_CLIENT_SECRET, SESSION_SECRET, SOUNDBOARD_TOKEN
+  //   SPOTIFY_CLIENT_ID, SPOTIFY_CLIENT_SECRET, SESSION_SECRET, SOUNDBOARD_TOKEN,
+  //   GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET (YouTube; optional)
   //   (SOUNDBOARD_TOKEN = that Soundboard env's JARVIS_TOKEN)
   // Email: `send_email` binding EMAIL (Cloudflare Email Sending, noreply@dabrewer.dev).
   //   Sent by the Worker, not the Durable Object (a DO's send_email binding only
@@ -34,6 +35,7 @@
   "routes": [{ "pattern": "musickiosk.dabrewer.dev", "custom_domain": true }],
   "vars": {
     "SPOTIFY_REDIRECT_URI": "https://musickiosk.dabrewer.dev/api/spotify/callback",
+        "GOOGLE_REDIRECT_URI": "https://musickiosk.dabrewer.dev/api/youtube/callback",
     "SOUNDBOARD_URL": "https://soundboard.dabrewer.dev",
     "BOOTSTRAP_ADMIN_EMAIL": "myemailisdanmail@gmail.com"
   },
@@ -52,6 +54,7 @@
       "durable_objects": { "bindings": [{ "name": "KIOSK", "class_name": "KioskObject" }] },
       "vars": {
         "SPOTIFY_REDIRECT_URI": "https://musickiosk-dev.dabrewer.dev/api/spotify/callback",
+        "GOOGLE_REDIRECT_URI": "https://musickiosk-dev.dabrewer.dev/api/youtube/callback",
         "SOUNDBOARD_URL": "https://soundboard-dev.dabrewer.dev",
         "BOOTSTRAP_ADMIN_EMAIL": "myemailisdanmail@gmail.com"
       },

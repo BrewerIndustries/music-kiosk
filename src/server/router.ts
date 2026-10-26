@@ -27,6 +27,7 @@ import * as auth from "./routes/auth/[action]/route";
 import * as users from "./routes/users/route";
 import * as user from "./routes/users/[id]/route";
 import * as userResend from "./routes/users/[id]/resend/route";
+import * as youtube from "./routes/youtube/[action]/route";
 
 type Handler = (req: NextRequest, ctx: { params: Promise<Record<string, string>> }) => Response | Promise<Response>;
 type RouteModule = Partial<Record<"GET" | "POST" | "PATCH" | "PUT" | "DELETE", Handler>>;
@@ -59,6 +60,7 @@ const table: [string, unknown][] = [
   ["/api/users/:id/resend", userResend],
   ["/api/users/:id", user],
   ["/api/users", users],
+  ["/api/youtube/:action", youtube],
 ];
 
 const routes = table.map(([pattern, mod]) => {

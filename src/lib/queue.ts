@@ -1,10 +1,14 @@
-// Up Next — the kiosk's own queue (Spotify tracks + soundboard clips). Spotify's
+// Up Next — the kiosk's own queue (Spotify tracks, YouTube songs, soundboard clips). Spotify's
 // queue is append-only, so this table is the source of truth and the engine feeds
 // Spotify one track at a time.
 import { randomUUID } from "crypto";
 import { db } from "./db";
 
-export type QueueKind = "track" | "clip";
+export type QueueKind = "track" | "clip" | "youtube";
+
+// Clips and YouTube songs play in the kiosk browser tab (the audio host) while
+// Spotify waits paused; tracks are handed to Spotify.
+export const playsInBrowser = (kind: QueueKind) => kind === "clip" || kind === "youtube";
 export type QueueStatus = "pending" | "queued" | "handed_off" | "played" | "rejected";
 
 export type QueueItem = {

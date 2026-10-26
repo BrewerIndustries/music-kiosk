@@ -6,7 +6,7 @@ import { poke } from "@/lib/engine";
 // Settings that are safe to carry over from another kiosk (scripts/import-local.mjs):
 // the Spotify connection, the playlist and every kiosk setting, play history and
 // the resume point. Holds and engine bookkeeping are left behind on purpose.
-const IMPORTABLE = /^(spotify_|playlist_|duck_percent$|music_volume$|clip_volume$|fade_|music_fade_|song_transition_ms$|require_approval$|party_code$|guest_open$|guest_limit$|guest_window_min$|guest_block_dupes$|play_history|resume_point$|player_pref$)/;
+const IMPORTABLE = /^(spotify_|playlist_|duck_percent$|music_volume$|clip_volume$|fade_|music_fade_|song_transition_ms$|require_approval$|party_code$|guest_open$|guest_limit$|guest_window_min$|guest_block_dupes$|youtube_enabled$|play_history|resume_point$|player_pref$)/;
 
 // POST /api/import { settings: { key: value } } — admins only.
 export function POST(req: NextRequest) {

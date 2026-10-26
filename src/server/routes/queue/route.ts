@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { addItem, clearQueue, upNext } from "@/lib/queue";
+import { addItem, clearQueue, upNext, type NewItem } from "@/lib/queue";
+import { videoIdOf } from "@/lib/youtube";
 import { playNow, poke } from "@/lib/engine";
 import { adminRoute } from "@/lib/auth";
 
@@ -11,30 +12,46 @@ export function GET(req: NextRequest) {
 
 // POST /api/queue — add to Up Next.
 // { kind: "track", uri, title, subtitle, art, durationMs } | { kind: "clip", clipKey, title, subtitle }
+// | { kind: "youtube", uri: "youtube:video:<id>", title, subtitle, art, durationMs }
 // Optional: requestedBy, playNow (start it immediately), top (put it first in Up Next).
+// { items: [ …up to 200 of the above… ] } adds a batch (e.g. a whole YouTube playlist).
 export function POST(req: NextRequest) {
   return adminRoute(req, async () => {
     const b = (await req.json()) as Record<string, unknown>;
-    const str = (v: unknown) => (typeof v === "string" ? v : null);
-    if (b.kind === "track" && !str(b.uri)?.startsWith("spotify:track:"))
-      return NextResponse.json({ error: "track needs a spotify:track: uri" }, { status: 400 });
-    if (b.kind === "clip" && !str(b.clipKey))
-      return NextResponse.json({ error: "clip needs a clipKey" }, { status: 400 });
-    if (b.kind !== "track" && b.kind !== "clip") return NextResponse.json({ error: "bad kind" }, { status: 400 });
-    const item = addItem({
-      kind: b.kind,
-      uri: str(b.uri),
-      clipKey: str(b.clipKey),
-      title: str(b.title) ?? "Untitled",
-      subtitle: str(b.subtitle) ?? "",
-      art: str(b.art),
-      durationMs: typeof b.durationMs === "number" ? b.durationMs : 0,
-      requestedBy: str(b.requestedBy),
-    }, { atFront: b.top === true });
+    if (Array.isArray(b.items)) {
+      const parsed = b.items.slice(0, 200).map((x) => parseItem(x as Record<string, unknown>));
+      const bad = parsed.find((x) => typeof x === "string");
+      if (bad) return NextResponse.json({ error: bad }, { status: 400 });
+      const items = (parsed as NewItem[]).map((it) => addItem(it));
+      poke();
+      return NextResponse.json({ added: items.length }, { status: 201 });
+    }
+    const parsed = parseItem(b);
+    if (typeof parsed === "string") return NextResponse.json({ error: parsed }, { status: 400 });
+    const item = addItem(parsed, { atFront: b.top === true });
     if (b.playNow === true) await playNow(item.id);
     else poke();
     return NextResponse.json({ item }, { status: 201 });
   });
+}
+
+// A validated new Up Next item, or the reason it isn't one.
+function parseItem(b: Record<string, unknown>): NewItem | string {
+  const str = (v: unknown) => (typeof v === "string" ? v : null);
+  if (b.kind === "track" && !str(b.uri)?.startsWith("spotify:track:")) return "track needs a spotify:track: uri";
+  if (b.kind === "clip" && !str(b.clipKey)) return "clip needs a clipKey";
+  if (b.kind === "youtube" && !videoIdOf(str(b.uri))) return "youtube needs a youtube:video: uri";
+  if (b.kind !== "track" && b.kind !== "clip" && b.kind !== "youtube") return "bad kind";
+  return {
+    kind: b.kind,
+    uri: str(b.uri),
+    clipKey: str(b.clipKey),
+    title: str(b.title) ?? "Untitled",
+    subtitle: str(b.subtitle) ?? "",
+    art: str(b.art),
+    durationMs: typeof b.durationMs === "number" ? b.durationMs : 0,
+    requestedBy: str(b.requestedBy),
+  };
 }
 
 // DELETE /api/queue — clear Up Next (and pending guest requests).

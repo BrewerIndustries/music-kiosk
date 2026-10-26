@@ -18,13 +18,15 @@ export function GET(req: NextRequest) {
   const nowId = snap.nowPlayingItem?.id ?? null;
   const track = snap.playback?.track ?? null;
 
-  const songs = upNext().filter((i) => i.kind === "track");
+  const songs = upNext().filter((i) => i.kind !== "clip"); // clips stay a surprise
   const place = new Map(songs.map((i, idx) => [i.id, idx + 1]));
   const show = (i: QueueItem) => ({ title: i.title, subtitle: i.subtitle, art: i.art });
 
   return NextResponse.json({
     ok: true,
-    nowPlaying: track
+    nowPlaying: snap.youtubeNow
+      ? { title: snap.youtubeNow.title, subtitle: snap.youtubeNow.subtitle, art: snap.youtubeNow.art, isPlaying: true }
+      : track
       ? { title: track.title, subtitle: track.subtitle, art: track.art, isPlaying: snap.playback?.isPlaying ?? false }
       : null,
     queue: songs.map((i) => ({

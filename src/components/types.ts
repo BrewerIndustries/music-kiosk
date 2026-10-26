@@ -10,6 +10,7 @@ export type KioskState = {
   locked: boolean;
   me?: { id: string; email: string; name: string; role: "admin" | "member" } | null;
   spotify?: { configured: boolean; connected: boolean; user: { name?: string; product?: string } | null };
+  youtube?: { configured: boolean; connected: boolean; user: { name?: string; email?: string } | null };
   error?: string | null;
   playback?: {
     isPlaying: boolean;
@@ -21,6 +22,7 @@ export type KioskState = {
     shuffle: boolean;
   } | null;
   nowPlayingItem?: QueueItem | null;
+  youtubeNow?: (QueueItem & { startedAt: number }) | null;
   ducked?: boolean;
   fading?: boolean;
   holdActive?: boolean;

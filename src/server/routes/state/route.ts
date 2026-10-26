@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { activeClip, ensureEngine, freshen, heartbeat, poke, snapshot } from "@/lib/engine";
 import { pendingRequests, recentlyPlayed, upNext } from "@/lib/queue";
 import { clientConfig, isConnected } from "@/lib/spotify";
+import { ytConfig, ytConnected, ytUser } from "@/lib/youtube";
 import { getSetting } from "@/lib/db";
 import { getSettings } from "@/lib/settings";
 import { currentUser } from "@/lib/auth";
@@ -25,6 +26,7 @@ export function GET(req: NextRequest) {
     locked: false,
     me,
     spotify: { configured: clientConfig().configured, connected: isConnected(), user: user ? JSON.parse(user) : null },
+    youtube: { configured: ytConfig().configured, connected: ytConnected(), user: ytUser() },
     ...snapshot(),
     upNext: upNext(),
     pending: pendingRequests(),

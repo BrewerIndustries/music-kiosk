@@ -129,6 +129,25 @@ It's a responsive web app: every feature works on a **laptop, iPad, or phone**. 
 - **Progress bar** is draggable (and ←/→ steps 10 s) to seek in the song.
 - **Lower the music** switch (Sounds tab, *Play over* mode): off plays clips over the
   music at full volume with no duck (remembered per device).
+- **YouTube / YouTube Music** (*Settings ▸ YouTube*, off by default): connect a Google
+  account (read-only), switch it on, and search gets **Spotify | YouTube** tabs.
+  YouTube has a song search (music category; runs on Enter, since each search is 1% of
+  the 10,000-unit daily API quota; cached 1 h server-side) and **Your playlists** (the
+  account's YouTube playlists, which include ones made in YouTube Music; open one to
+  add songs or **+ Add all**, up to 200). Songs go into Up Next as `youtube` items
+  (`uri = youtube:video:<id>`). The engine treats them like queued clips: it pauses
+  Spotify ~1.5 s before the song ends, the audio-host kiosk tab plays the video in
+  YouTube's embedded IFrame player ([src/lib/youtubePlayer.ts](src/lib/youtubePlayer.ts),
+  visible ≥200×200 as YouTube requires — no audio-only playback), and reports back;
+  a run of YouTube songs plays back to back, then Spotify resumes. ⏭ skips the
+  YouTube song; Spotify's ▶ ends it and goes back to Spotify. Volume follows the
+  music volume; Pause & play / Play over sounds hold the YouTube song like Spotify.
+  If the browser blocks autoplay (iOS), the player shows *Tap to play*. Videos that
+  can't be embedded are filtered out. Guests stay Spotify-only but see YouTube songs
+  in the queue. Limits: plays only on the kiosk screen (no remote control of the
+  YouTube app); ads unless that browser is signed into YouTube Premium; a short
+  gap at each Spotify↔YouTube switch. Phase 2 (planned): mixed kiosk playlists as
+  the backdrop.
 - **Accounts** ([src/lib/accounts.ts](src/lib/accounts.ts)): invite-only email +
   password. Admins invite from *Settings ▸ People* (emailed link, 7 days; the link is
   also shown to copy), set admin/member, disable, remove, resend; there is always
@@ -151,6 +170,16 @@ npm test && npm run typecheck && npm run lint
 
 Or `npx next build` then open the Worker directly at http://127.0.0.1:8787 (it serves
 `out/`). Local emails aren't sent: wrangler writes them under `.wrangler/tmp/email/`.
+
+YouTube needs a Google Cloud OAuth client (Web application) with the YouTube Data API
+v3 enabled; secrets `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET`, redirect URIs
+`https://musickiosk-dev.dabrewer.dev/api/youtube/callback`,
+`https://musickiosk.dabrewer.dev/api/youtube/callback` and
+`http://127.0.0.1:8787/api/youtube/callback`. Set the consent screen to **In
+production** — in *Testing*, Google expires refresh tokens after 7 days.
+
+**Deploy gotcha:** after `wrangler deploy` the Worker updates at once, but the Durable
+Object (all of `/api`) can keep serving the previous code for a few minutes.
 
 Spotify app setup (developer.spotify.com → Create app, Web API + Web Playback SDK):
 register each redirect URI exactly (Spotify rejects `localhost`):

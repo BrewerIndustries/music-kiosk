@@ -7,6 +7,8 @@ import {
   keepPosition,
   placeBeforeMove,
   instantPause,
+  skipCurrent,
+  snapshot,
   instantResume,
   poke,
   releaseHolds,
@@ -37,14 +39,16 @@ export function POST(req: NextRequest) {
     let result: Record<string, unknown> = { ok: true };
     switch (b.action) {
       case "play":
-        await api("PUT", "/me/player/play", undefined, { device_id: deviceId });
+        // Spotify's ▶ during a YouTube song means "back to Spotify": end the YouTube song.
+        if (snapshot().youtubeNow) await skipCurrent();
+        else await api("PUT", "/me/player/play", undefined, { device_id: deviceId });
         break;
       case "pause":
         await api("PUT", "/me/player/pause");
         markStopped();
         break;
       case "next":
-        await api("POST", "/me/player/next");
+        await skipCurrent();
         break;
       case "previous":
         await api("POST", "/me/player/previous");
