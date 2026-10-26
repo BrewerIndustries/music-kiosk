@@ -1,12 +1,14 @@
 // Queue engine runtime: one polling loop per server process. It watches Spotify
 // playback, asks engine-core's decide() what to do, and does it. The kiosk UI reads
 // the cached snapshot from here instead of hitting Spotify itself.
-import { api, getPlayback, isConnected, summarize, SpotifyError, type SpPlayback } from "./spotify";
+import { api, getPlayback, isConnected, summarize, SpotifyError, type SpPlayback, type SpTrack, type TrackSummary } from "./spotify";
 import { decide, initialMemory, type Memory } from "./engine-core";
 import { getItem, head, moveToFront, setStatus, type QueueItem } from "./queue";
 
 const CLIP_TIMEOUT_MS = 5 * 60_000; // give up on a queued clip the browser never finished
 const HOST_STALE_MS = 10_000; // a kiosk tab that hasn't polled in this long can't play clips
+const UPCOMING_REFRESH_MS = 15_000; // re-read Spotify's upcoming list at least this often
+const UPCOMING_SHOWN = 10;
 
 type EngineState = {
   started: boolean;
@@ -19,12 +21,18 @@ type EngineState = {
   audioHost: { id: string; seenAt: number } | null;
   duck: { previousVolume: number; holders: number } | null;
   pausedForInstant: { holders: number } | null;
+  // What Spotify will play after the current track (playlist order, shuffle and
+  // repeat included), minus our own handed-off track. Shown under Up Next.
+  upcoming: TrackSummary[];
+  upcomingAt: number;
+  upcomingForUri: string | null;
+  upcomingStale: boolean;
 };
 
-const g = globalThis as unknown as { _kioskEngine?: EngineState };
+const g = globalThis as unknown as { _kioskEngine?: EngineState; _kioskTick?: () => Promise<void> };
 
-function state(): EngineState {
-  g._kioskEngine ??= {
+function freshState(): EngineState {
+  return {
     started: false,
     timer: null,
     memory: initialMemory(),
@@ -34,8 +42,23 @@ function state(): EngineState {
     audioHost: null,
     duck: null,
     pausedForInstant: null,
+    upcoming: [],
+    upcomingAt: 0,
+    upcomingForUri: null,
+    upcomingStale: true,
   };
-  return g._kioskEngine;
+}
+
+// The engine state survives dev hot reloads on globalThis; backfill fields added
+// since it was created so new code doesn't read undefined.
+let backfilled = false;
+
+function state(): EngineState {
+  if (!backfilled) {
+    g._kioskEngine = Object.assign(freshState(), g._kioskEngine);
+    backfilled = true;
+  }
+  return g._kioskEngine!;
 }
 
 export function ensureEngine() {
@@ -47,13 +70,15 @@ export function ensureEngine() {
 
 // Run a tick now (after a user action) instead of waiting for the next poll.
 export function poke() {
+  state().upcomingStale = true;
   schedule(50);
 }
 
 function schedule(ms: number) {
   const s = state();
   if (s.timer) clearTimeout(s.timer);
-  s.timer = setTimeout(tick, ms);
+  // Call through globalThis so a hot-reloaded module's tick takes over the loop.
+  s.timer = setTimeout(() => g._kioskTick?.(), ms);
 }
 
 async function tick() {
@@ -99,6 +124,10 @@ async function tick() {
       }
 
       if (s.memory.clip && Date.now() - s.memory.clip.startedAt > CLIP_TIMEOUT_MS) await finishClip(s.memory.clip.id);
+
+      const uri = pb?.item?.uri ?? null;
+      if (s.upcomingStale || uri !== s.upcomingForUri || Date.now() - s.upcomingAt > UPCOMING_REFRESH_MS)
+        await refreshUpcoming(uri).catch(() => {});
     }
   } catch (e) {
     s.error = e instanceof Error ? e.message : String(e);
@@ -106,6 +135,25 @@ async function tick() {
   }
   schedule(delay);
 }
+
+async function refreshUpcoming(currentUri: string | null) {
+  const s = state();
+  s.upcomingStale = false;
+  s.upcomingAt = Date.now();
+  s.upcomingForUri = currentUri;
+  if (!currentUri) {
+    s.upcoming = [];
+    return;
+  }
+  const res = await api<{ queue: SpTrack[] }>("GET", "/me/player/queue");
+  const tracks = (res?.queue ?? []).filter((t) => t?.uri?.startsWith("spotify:track:"));
+  // Our handed-off track sits at the front of Spotify's queue; it's already shown in Up Next.
+  const handoffUri = s.memory.handoff?.uri;
+  if (handoffUri && tracks[0]?.uri === handoffUri) tracks.shift();
+  s.upcoming = tracks.slice(0, UPCOMING_SHOWN).map(summarize);
+}
+
+g._kioskTick = tick;
 
 function hostAlive(): boolean {
   const h = state().audioHost;
@@ -240,5 +288,6 @@ export function snapshot() {
       : null,
     nowPlayingItem: s.memory.nowPlayingId ? getItem(s.memory.nowPlayingId) : null,
     ducked: Boolean(s.duck),
+    upcoming: s.upcoming,
   };
 }

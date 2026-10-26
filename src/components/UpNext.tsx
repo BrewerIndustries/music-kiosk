@@ -1,9 +1,12 @@
 "use client";
 import { call, fmtTime } from "@/lib/client";
-import type { KioskState, Notify, QueueItem } from "./types";
+import type { KioskState, Notify, QueueItem, TrackSummary } from "./types";
 
 export function UpNext({ state, notify }: { state: KioskState; notify: Notify }) {
   const items = state.upNext ?? [];
+  const upcoming = state.upcoming ?? [];
+  const ctx = state.playback?.contextUri;
+  const fromName = ctx && ctx === state.settings?.playlistUri ? state.settings?.playlistName : null;
   const patch = (id: string, action: string) =>
     call("PATCH", `/api/queue/${id}`, { action }).catch((e) => notify(e.message));
   const remove = (id: string) => call("DELETE", `/api/queue/${id}`).catch((e) => notify(e.message));
@@ -21,13 +24,7 @@ export function UpNext({ state, notify }: { state: KioskState; notify: Notify })
           </button>
         )}
       </div>
-      {items.length === 0 ? (
-        <p className="py-6 text-center text-sm text-muted">
-          Nothing queued — the playlist keeps going.
-          <br />
-          Search for a song or add a sound to slot it in next.
-        </p>
-      ) : (
+      {items.length > 0 ? (
         <ol className="space-y-1">
           {items.map((it, i) => (
             <Row
@@ -42,11 +39,43 @@ export function UpNext({ state, notify }: { state: KioskState; notify: Notify })
             />
           ))}
         </ol>
+      ) : (
+        <p className="rounded-lg border border-dashed border-line px-3 py-2 text-xs text-muted">
+          Songs and sounds you add slot in here, ahead of the playlist.
+        </p>
       )}
-      {items.length > 0 && (
-        <p className="mt-3 text-xs text-muted">Then back to {state.settings?.playlistName ?? "the playlist"}.</p>
+
+      {upcoming.length > 0 && (
+        <>
+          <h3 className="mb-1 mt-4 truncate text-xs font-semibold uppercase tracking-wider text-muted">
+            Then from {fromName ?? "Spotify"}
+          </h3>
+          <ol className="space-y-0.5">
+            {upcoming.map((t, i) => (
+              <PlaylistRow key={`${t.uri}-${i}`} track={t} />
+            ))}
+          </ol>
+        </>
+      )}
+      {upcoming.length === 0 && items.length === 0 && (
+        <p className="py-4 text-center text-sm text-muted">Start a playlist to see what&apos;s coming up.</p>
       )}
     </section>
+  );
+}
+
+function PlaylistRow({ track }: { track: TrackSummary }) {
+  return (
+    <li className="flex items-center gap-3 rounded-lg px-2 py-1 opacity-70">
+      <div className="art h-9 w-9 shrink-0 text-sm">
+        {track.art ? <img src={track.art} alt="" className="h-full w-full object-cover" /> : <span>♪</span>}
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="truncate text-sm">{track.title}</div>
+        <div className="truncate text-xs text-muted">{track.subtitle}</div>
+      </div>
+      <span className="shrink-0 text-xs tabular-nums text-muted">{fmtTime(track.durationMs)}</span>
+    </li>
   );
 }
 

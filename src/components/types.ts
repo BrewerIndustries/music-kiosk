@@ -21,6 +21,7 @@ export type KioskState = {
   } | null;
   nowPlayingItem?: QueueItem | null;
   ducked?: boolean;
+  upcoming?: TrackSummary[];
   upNext?: QueueItem[];
   pending?: QueueItem[];
   recent?: QueueItem[];
