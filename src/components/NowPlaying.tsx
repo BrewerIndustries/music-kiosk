@@ -1,8 +1,9 @@
 "use client";
 import { useEffect, useState } from "react";
-import { call, fmtTime } from "@/lib/client";
+import { call, expect, fmtTime, KIOSK_EXPECT, type Expectation } from "@/lib/client";
 import { PlaylistPicker } from "./PlaylistPicker";
 import { VolumeControls } from "./VolumeControls";
+import { FadeIcon } from "./FadeIcon";
 import type { KioskState, Notify, SpDevice } from "./types";
 
 type Props = {
@@ -13,7 +14,6 @@ type Props = {
 
 export function NowPlaying({ state, notify, sdkDeviceId }: Props) {
   const pb = state.playback;
-  const track = pb?.track;
   const [now, setNow] = useState(() => Date.now());
   const [devicesOpen, setDevicesOpen] = useState(false);
   const [playlistOpen, setPlaylistOpen] = useState(false);
@@ -23,14 +23,70 @@ export function NowPlaying({ state, notify, sdkDeviceId }: Props) {
     return () => clearInterval(t);
   }, []);
 
-  const progress = pb ? Math.min(pb.progressMs + (pb.isPlaying ? now - pb.at : 0), track?.durationMs ?? 0) : 0;
+  // What a tap just asked for, shown at once and held until Spotify agrees (or
+  // for a few seconds, after which Spotify's word wins).
+  const [want, setWant] = useState<(Expectation & { at: number }) | null>(null);
+  useEffect(() => {
+    const on = (e: Event) => setWant({ ...(e as CustomEvent<Expectation>).detail, at: Date.now() });
+    window.addEventListener(KIOSK_EXPECT, on);
+    return () => window.removeEventListener(KIOSK_EXPECT, on);
+  }, []);
+  const wantLive = want && now - want.at < 4000 ? want : null;
+  const realTrack = pb?.track ?? null;
+  const shownTrack =
+    wantLive?.track && wantLive.track.uri !== realTrack?.uri ? { ...wantLive.track, explicit: false } : realTrack;
+  const pendingTrack = shownTrack !== realTrack;
+  const isPlaying =
+    wantLive?.playing !== undefined && (pendingTrack || pb?.isPlaying !== wantLive.playing)
+      ? wantLive.playing
+      : Boolean(pb?.isPlaying);
+
+  const track = shownTrack;
+  // Freeze the bar the moment pause is tapped; restart it for a song being loaded.
+  const until = pb?.isPlaying ? (isPlaying ? now : (wantLive?.at ?? now)) : pb?.at ?? now;
+  const progress = pendingTrack
+    ? 0
+    : pb
+      ? Math.min(pb.progressMs + Math.max(0, until - pb.at), track?.durationMs ?? 0)
+      : 0;
   const pct = track?.durationMs ? (progress / track.durationMs) * 100 : 0;
 
-  const act = (action: string, extra: Record<string, unknown> = {}) =>
-    call("POST", "/api/player", { action, ...extra }).catch((e) => notify(e.message));
+  // Transport actions. If the target player has vanished (the classic case: this
+  // tab reloaded, so its old browser player is gone), move playback to this tab's
+  // new browser player and try once more.
+  const act = async (action: string, extra: Record<string, unknown> = {}): Promise<boolean> => {
+    if (action === "play" || action === "fadeIn") expect({ playing: true });
+    if (action === "pause") expect({ playing: false });
+    try {
+      await call("POST", "/api/player", { action, ...extra });
+      return true;
+    } catch (e) {
+      const gone = /device not found|no active device/i.test((e as Error).message);
+      if (!gone || !sdkDeviceId) {
+        expect({}); // it didn't happen: show Spotify's real state again
+        notify((e as Error).message);
+        return false;
+      }
+      try {
+        if (action === "startPlaylist") {
+          await call("POST", "/api/player", { action, deviceId: sdkDeviceId });
+        } else {
+          await call("POST", "/api/player", { action: "transfer", deviceId: sdkDeviceId, browser: true, play: true });
+          if (action !== "play") await call("POST", "/api/player", { action, ...extra });
+        }
+        notify("That player was gone — moved the music to this browser");
+        return true;
+      } catch (e2) {
+        expect({});
+        notify((e2 as Error).message);
+        return false;
+      }
+    }
+  };
 
   const playlistUri = state.settings?.playlistUri ?? null;
-  const targetDevice = pb?.device?.id ?? sdkDeviceId ?? undefined;
+  // Prefer the live player; if nothing is active, this tab's browser player.
+  const targetDevice = (pb?.device?.is_active ? pb.device.id : null) ?? sdkDeviceId ?? pb?.device?.id ?? undefined;
 
   const startPlaylist = () => {
     if (!playlistUri) {
@@ -50,8 +106,7 @@ export function NowPlaying({ state, notify, sdkDeviceId }: Props) {
         setDevicesOpen(true);
         return;
       }
-      await call("POST", "/api/player", { action: "startPlaylist", deviceId: targetDevice });
-      notify(`Playing “${name}”`);
+      if (await act("startPlaylist", { deviceId: targetDevice })) notify(`Playing “${name}”`);
     } catch (e) {
       notify((e as Error).message);
     }
@@ -65,8 +120,9 @@ export function NowPlaying({ state, notify, sdkDeviceId }: Props) {
         </div>
         <div className="min-w-0 flex-1">
           <div className="text-xs uppercase tracking-wider text-muted">
-            {pb ? (pb.isPlaying ? "Now playing" : "Paused") : "Nothing playing"}
+            {pendingTrack ? "Loading…" : pb ? (isPlaying ? "Now playing" : "Paused") : "Nothing playing"}
             {state.ducked && <span className="ml-2 text-accent">· ducked</span>}
+            {state.fading && <span className="ml-2 text-accent">· fading…</span>}
           </div>
           <div className="truncate text-lg font-semibold">{track?.title ?? "—"}</div>
           <div className="truncate text-sm text-muted">{track?.subtitle ?? ""}</div>
@@ -95,7 +151,16 @@ export function NowPlaying({ state, notify, sdkDeviceId }: Props) {
 
       <div className="mt-3 flex items-center justify-center gap-2">
         <button className="btn-round" aria-label="Previous" onClick={() => act("previous")}>⏮</button>
-        {pb?.isPlaying ? (
+        <button
+          className="btn-round"
+          aria-label="Fade in"
+          title={`Fade in (${((state.settings?.musicFadeInMs ?? 3000) / 1000).toFixed(1)} s)`}
+          disabled={state.fading}
+          onClick={() => (pb?.track ? act("fadeIn") : startPlaylist())}
+        >
+          <FadeIcon dir="in" />
+        </button>
+        {isPlaying ? (
           <button className="btn-round btn-round-lg" aria-label="Pause" onClick={() => act("pause")}>⏸</button>
         ) : (
           <button
@@ -106,6 +171,15 @@ export function NowPlaying({ state, notify, sdkDeviceId }: Props) {
             ▶
           </button>
         )}
+        <button
+          className="btn-round"
+          aria-label="Fade out"
+          title={`Fade out (${((state.settings?.musicFadeOutMs ?? 5000) / 1000).toFixed(1)} s)`}
+          disabled={!isPlaying || state.fading}
+          onClick={() => act("fadeOut")}
+        >
+          <FadeIcon dir="out" />
+        </button>
         <button className="btn-round" aria-label="Next" onClick={() => act("next")}>⏭</button>
       </div>
 
@@ -195,8 +269,15 @@ function DevicePicker({
       volume_percent: null,
     });
 
-  const pick = (id: string) =>
-    call("POST", "/api/player", { action: "transfer", deviceId: id, play: true })
+  // Any "Music Kiosk" player is a kiosk browser tab (this one or another) — remember
+  // it as "browser" so a reload resumes on that tab's new player.
+  const pick = (id: string, name: string) =>
+    call("POST", "/api/player", {
+      action: "transfer",
+      deviceId: id,
+      play: true,
+      browser: id === sdkDeviceId || name.startsWith("Music Kiosk"),
+    })
       .then(onPicked)
       .catch((e) => notify(e.message));
 
@@ -216,7 +297,7 @@ function DevicePicker({
         <button
           key={d.id ?? d.name}
           disabled={!d.id}
-          onClick={() => d.id && pick(d.id)}
+          onClick={() => d.id && pick(d.id, d.name)}
           className={`flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-sm hover:bg-line ${
             d.id === currentId ? "text-accent" : ""
           }`}

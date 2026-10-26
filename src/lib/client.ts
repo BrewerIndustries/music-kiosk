@@ -8,7 +8,23 @@ export async function call<T = Record<string, unknown>>(method: string, path: st
   });
   const json = (await res.json().catch(() => ({}))) as T & { error?: string };
   if (!res.ok) throw new Error(json.error ?? `HTTP ${res.status}`);
+  if (method !== "GET") kioskChanged();
   return json;
+}
+
+// Something changed (a control was used, or the browser player reported a new
+// state): the kiosk page re-reads the server snapshot right away instead of
+// waiting for its next poll.
+export const KIOSK_CHANGED = "kiosk-changed";
+export function kioskChanged(fromPlayer = false) {
+  if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent(KIOSK_CHANGED, { detail: { fromPlayer } }));
+}
+
+// Optimistic display: show what a tap will do before Spotify confirms it.
+export const KIOSK_EXPECT = "kiosk-expect";
+export type Expectation = { playing?: boolean; track?: { uri: string; title: string; subtitle: string; art: string | null; durationMs: number } };
+export function expect(e: Expectation) {
+  if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent(KIOSK_EXPECT, { detail: e }));
 }
 
 export function fmtTime(ms: number) {

@@ -1,5 +1,5 @@
 "use client";
-import { call, fmtTime } from "@/lib/client";
+import { call, expect, fmtTime } from "@/lib/client";
 import type { KioskState, Notify, QueueItem, TrackSummary } from "./types";
 
 export function UpNext({ state, notify }: { state: KioskState; notify: Notify }) {
@@ -34,7 +34,14 @@ export function UpNext({ state, notify }: { state: KioskState; notify: Notify })
               last={i === items.length - 1}
               onUp={() => patch(it.id, "up")}
               onDown={() => patch(it.id, "down")}
-              onPlayNow={() => patch(it.id, "playNow")}
+              onPlayNow={() => {
+                if (it.kind === "track" && it.uri)
+                  expect({
+                    playing: true,
+                    track: { uri: it.uri, title: it.title, subtitle: it.subtitle, art: it.art, durationMs: it.durationMs },
+                  });
+                patch(it.id, "playNow");
+              }}
               onRemove={() => remove(it.id)}
             />
           ))}
@@ -55,9 +62,35 @@ export function UpNext({ state, notify }: { state: KioskState; notify: Notify })
               <PlaylistRow
                 key={`${t.uri}-${i}`}
                 track={t}
-                onPlay={() =>
-                  call("POST", "/api/player", { action: "skipTo", uri: t.uri, index: i })
-                    .then(() => notify(`Skipping to “${t.title}”`))
+                onPlay={() => {
+                  expect({ track: t, playing: true });
+                  return call("POST", "/api/player", { action: "skipTo", uri: t.uri, index: i })
+                    .then(() => notify(`Playing “${t.title}”`))
+                    .catch((e) => {
+                      expect({});
+                      notify(e.message);
+                    });
+                }}
+                onCue={() => {
+                  expect({ track: t, playing: false });
+                  return call("POST", "/api/player", { action: "skipTo", uri: t.uri, index: i, paused: true })
+                    .then(() => notify(`“${t.title}” is loaded — press ▶ when ready`))
+                    .catch((e) => {
+                      expect({});
+                      notify(e.message);
+                    });
+                }}
+                onTop={() =>
+                  call("POST", "/api/queue", {
+                    kind: "track",
+                    uri: t.uri,
+                    title: t.title,
+                    subtitle: t.subtitle,
+                    art: t.art,
+                    durationMs: t.durationMs,
+                    top: true,
+                  })
+                    .then(() => notify(`“${t.title}” is up next`))
                     .catch((e) => notify(e.message))
                 }
               />
@@ -72,13 +105,25 @@ export function UpNext({ state, notify }: { state: KioskState; notify: Notify })
   );
 }
 
-function PlaylistRow({ track, onPlay }: { track: TrackSummary; onPlay: () => void }) {
+// A song further down the playlist: play it now, load it paused, or pull it to
+// the top of Up Next.
+function PlaylistRow({
+  track,
+  onPlay,
+  onCue,
+  onTop,
+}: {
+  track: TrackSummary;
+  onPlay: () => void;
+  onCue: () => void;
+  onTop: () => void;
+}) {
   return (
-    <li>
+    <li className="flex items-center gap-1 rounded-lg pr-1 opacity-70 hover:bg-line/50 hover:opacity-100">
       <button
         onClick={onPlay}
-        title="Skip to this song"
-        className="group flex w-full items-center gap-3 rounded-lg px-2 py-1 text-left opacity-70 hover:bg-line/50 hover:opacity-100"
+        title="Play now"
+        className="group flex min-w-0 flex-1 items-center gap-3 px-2 py-1 text-left"
       >
         <div className="art relative h-9 w-9 shrink-0 text-sm">
           {track.art ? <img src={track.art} alt="" className="h-full w-full object-cover" /> : <span>♪</span>}
@@ -90,6 +135,9 @@ function PlaylistRow({ track, onPlay }: { track: TrackSummary; onPlay: () => voi
         </div>
         <span className="shrink-0 text-xs tabular-nums text-muted">{fmtTime(track.durationMs)}</span>
       </button>
+      <button className="icon-btn" aria-label="Play now" title="Play now" onClick={onPlay}>▶</button>
+      <button className="icon-btn" aria-label="Load paused" title="Load it into the player, paused" onClick={onCue}>⏸</button>
+      <button className="icon-btn" aria-label="Move to top of Up Next" title="Move to the top of Up Next" onClick={onTop}>⤒</button>
     </li>
   );
 }

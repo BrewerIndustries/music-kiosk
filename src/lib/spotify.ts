@@ -106,6 +106,8 @@ export async function api<T>(
       },
       body: body !== undefined ? JSON.stringify(body) : undefined,
       cache: "no-store",
+      // A dead player or a network blip must not hang a fade or the engine loop.
+      signal: AbortSignal.timeout(10_000),
     });
     if (res.status === 401 && attempt === 0) {
       setSetting("spotify_expires_at", "0"); // force refresh and retry once

@@ -45,6 +45,25 @@ It's a responsive web app: every feature works on a **laptop, iPad, or phone**. 
   master gain for the Sounds volume), which also makes volume/fades work on iOS. A
   clip holds the music (paused or ducked) until it's stopped or ends; pausing a
   clip keeps the hold.
+- **Music fades:** ⏮ [fade in] ▶/⏸ [fade out] ⏭. Fade out ramps to silence, pauses,
+  and puts the volume back; fade in starts from silence if paused. Durations in
+  *Settings ▸ Music*.
+- **Playlist rows** (Up Next ▸ "Then from …"): ▶ play now, ⏸ load it paused at 0:00
+  (muted for the jump, then volume restored), ⤒ copy to the top of Up Next (it will
+  still play again when the playlist reaches it).
+- **Survives a reload / crash.** Holds (duck / pause-for-clip) are stored and released
+  on restart; the engine recovers its handoff from the DB. While music plays it saves a
+  resume point (track, playlist, position); deliberate stops (pause, fade out, load
+  paused) clear it. A reloaded kiosk page shows *Tap to resume the music*: one tap
+  moves playback to the new browser player (Spotify keeps the same device id) or
+  replays the saved point ~3 s early. If the SDK never reports ready, the server finds
+  the "Music Kiosk" player itself after 6 s. Tab, board/page, search text and clip mode
+  are kept in localStorage.
+- **Responsiveness:** taps show their result at once (optimistic play/pause and
+  "Loading…" for a picked song, dropped after 4 s if Spotify disagrees). After any
+  change the page polls every 250 ms and the engine re-reads Spotify every 400 ms
+  for 3 s; the browser player's `player_state_changed` triggers the same burst.
+  Spotify calls time out after 10 s so nothing hangs.
 - **Errors** from routes and the engine go to the server log and *Settings ▸ Recent errors*.
 - **Soundboard** stays the source of record for clips. The kiosk reads its open
   `/api/boards` and proxies `/api/audio/<key>` (`SOUNDBOARD_URL`).

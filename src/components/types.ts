@@ -22,6 +22,9 @@ export type KioskState = {
   } | null;
   nowPlayingItem?: QueueItem | null;
   ducked?: boolean;
+  fading?: boolean;
+  holdActive?: boolean;
+  resumeOffer?: { pref: string; uri: string; deviceId: string | null; deviceName: string | null } | null;
   musicVolume?: number | null;
   upcoming?: TrackSummary[];
   errors?: LoggedError[];

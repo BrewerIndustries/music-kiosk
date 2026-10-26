@@ -38,6 +38,24 @@ export function SettingsPanel({
       </section>
 
       <section className="card space-y-4 p-4 text-sm">
+        <h2 className="section-title">Music</h2>
+        <FadeSetting
+          label="Music fade in"
+          value={s?.musicFadeInMs ?? 3000}
+          onSave={(ms) => save({ musicFadeInMs: ms })}
+        />
+        <FadeSetting
+          label="Music fade out"
+          value={s?.musicFadeOutMs ?? 5000}
+          onSave={(ms) => save({ musicFadeOutMs: ms })}
+        />
+        <p className="text-xs text-muted">
+          Fade out lowers the music, pauses it, and puts the volume back for next time. Fade in starts it from
+          silence (or raises it) to the Music volume.
+        </p>
+      </section>
+
+      <section className="card space-y-4 p-4 text-sm">
         <h2 className="section-title">Sounds</h2>
         <label className="block">
           When a sound plays over the music, lower the music to{" "}

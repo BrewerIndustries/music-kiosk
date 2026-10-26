@@ -17,6 +17,7 @@ import {
   type ClipStatus,
 } from "@/lib/clipPlayer";
 import type { SbBoard, SbSound } from "@/lib/soundboard";
+import { FadeIcon } from "./FadeIcon";
 import type { KioskState, Notify } from "./types";
 
 type Mode = ClipMode | "queue";
@@ -67,8 +68,14 @@ export function SoundsPanel({ state, notify }: { state: KioskState; notify: Noti
       .then((r) => {
         setBoards(r.boards);
         setManageUrl(r.manageUrl);
-        setBoardId(r.boards[0]?.id ?? null);
-        setPageId(r.boards[0]?.pages[0]?.id ?? null);
+        // Reopen the board/page you were on (survives a reload).
+        let saved: { boardId?: string; pageId?: string } = {};
+        try {
+          saved = JSON.parse(localStorage.getItem("kiosk.soundsPage") ?? "{}");
+        } catch {}
+        const b = r.boards.find((x) => x.id === saved.boardId) ?? r.boards[0];
+        setBoardId(b?.id ?? null);
+        setPageId(b?.pages.find((p) => p.id === saved.pageId)?.id ?? b?.pages[0]?.id ?? null);
       })
       .catch((e) => setError(e.message));
   }, []);
@@ -79,6 +86,13 @@ export function SoundsPanel({ state, notify }: { state: KioskState; notify: Noti
       localStorage.setItem("kiosk.clipMode", m);
     } catch {}
   };
+
+  useEffect(() => {
+    if (!boardId) return;
+    try {
+      localStorage.setItem("kiosk.soundsPage", JSON.stringify({ boardId, pageId }));
+    } catch {}
+  }, [boardId, pageId]);
 
   const board = boards?.find((b) => b.id === boardId) ?? null;
   const page = board?.pages.find((p) => p.id === pageId) ?? board?.pages[0] ?? null;
@@ -266,14 +280,5 @@ function SoundCard({
         </button>
       </div>
     </div>
-  );
-}
-
-// A volume ramp: rising for fade in, falling for fade out.
-function FadeIcon({ dir }: { dir: "in" | "out" }) {
-  return (
-    <svg viewBox="0 0 20 14" className="h-3.5 w-5" aria-hidden="true">
-      <path d={dir === "in" ? "M1 13 L19 13 L19 1 Z" : "M1 13 L19 13 L1 1 Z"} fill="currentColor" />
-    </svg>
   );
 }

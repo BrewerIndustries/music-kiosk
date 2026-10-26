@@ -4,7 +4,18 @@ import { call, fmtTime } from "@/lib/client";
 import type { KioskState, Notify, TrackSummary } from "./types";
 
 export function SearchPanel({ state, notify }: { state: KioskState; notify: Notify }) {
-  const [q, setQ] = useState("");
+  const [q, setQState] = useState("");
+  useEffect(() => {
+    try {
+      setQState(localStorage.getItem("kiosk.search") ?? "");
+    } catch {}
+  }, []);
+  const setQ = (v: string) => {
+    setQState(v);
+    try {
+      localStorage.setItem("kiosk.search", v);
+    } catch {}
+  };
   const [results, setResults] = useState<TrackSummary[]>([]);
   const [loading, setLoading] = useState(false);
   const queued = new Set((state.upNext ?? []).map((i) => i.uri));

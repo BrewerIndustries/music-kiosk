@@ -180,6 +180,10 @@ function setStatus(id: string, h: Handle, status: Handle["status"], afterMs?: nu
   emit();
 }
 
+// play() rejects with AbortError when pause() lands before playback starts (e.g.
+// a quick play → pause). That's not a failure — the clip is just paused.
+const isAbort = (e: unknown) => (e as { name?: string })?.name === "AbortError";
+
 function finish(id: string) {
   const h = handles.get(id);
   if (!h) return;
@@ -213,7 +217,7 @@ export async function startClip(
   handles.set(id, h);
   audio.addEventListener("ended", () => handles.get(id) === h && finish(id));
   audio.addEventListener("error", () => handles.get(id) === h && finish(id));
-  audio.play().catch(() => handles.get(id) === h && finish(id));
+  audio.play().catch((e) => handles.get(id) === h && !isAbort(e) && finish(id));
   if (fadeInMs > 0) {
     f.ramp(1, fadeInMs);
     setStatus(id, h, "fading-in", fadeInMs, () => setStatus(id, h, "playing"));
@@ -239,7 +243,7 @@ export function resumeClip(id: string, fadeInMs = 0) {
     h.fader.set(1);
     setStatus(id, h, "playing");
   }
-  h.audio.play().catch(() => finish(id));
+  h.audio.play().catch((e) => !isAbort(e) && finish(id));
 }
 
 export function stopClip(id: string) {

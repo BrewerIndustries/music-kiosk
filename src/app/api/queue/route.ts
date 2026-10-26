@@ -11,7 +11,7 @@ export function GET(req: NextRequest) {
 
 // POST /api/queue — add to Up Next.
 // { kind: "track", uri, title, subtitle, art, durationMs } | { kind: "clip", clipKey, title, subtitle }
-// Optional: requestedBy, playNow (start it immediately).
+// Optional: requestedBy, playNow (start it immediately), top (put it first in Up Next).
 export function POST(req: NextRequest) {
   return adminRoute(req, async () => {
     const b = (await req.json()) as Record<string, unknown>;
@@ -30,7 +30,7 @@ export function POST(req: NextRequest) {
       art: str(b.art),
       durationMs: typeof b.durationMs === "number" ? b.durationMs : 0,
       requestedBy: str(b.requestedBy),
-    });
+    }, { atFront: b.top === true });
     if (b.playNow === true) await playNow(item.id);
     else poke();
     return NextResponse.json({ item }, { status: 201 });

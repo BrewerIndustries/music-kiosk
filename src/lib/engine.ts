@@ -5,7 +5,8 @@ import { api, getPlayback, isConnected, summarize, SpotifyError, type SpPlayback
 import { decide, initialMemory, type Memory } from "./engine-core";
 import { logError, recentErrors } from "./log";
 import { getSettings, updateSettings } from "./settings";
-import { getItem, head, moveToFront, setStatus, type QueueItem } from "./queue";
+import { getItem, head, moveToFront, setStatus, upNext, type QueueItem } from "./queue";
+import { getSetting, setSetting } from "./db";
 
 const CLIP_TIMEOUT_MS = 5 * 60_000; // give up on a queued clip the browser never finished
 const HOST_STALE_MS = 10_000; // a kiosk tab that hasn't polled in this long can't play clips
@@ -13,6 +14,8 @@ const UPCOMING_REFRESH_MS = 15_000; // re-read Spotify's upcoming list at least 
 const UPCOMING_SHOWN = 10;
 const DUCK_WATCHDOG_MS = 3 * 60_000; // restore the volume if a duck is somehow left on
 const VOLUME_SYNC_QUIET_MS = 6000;
+const RESUME_MAX_AGE_MS = 6 * 60 * 60_000; // offer to resume playback lost up to 6 h ago
+const FADE_STEP_MS = 200;
 
 type EngineState = {
   started: boolean;
@@ -37,6 +40,11 @@ type EngineState = {
   upcomingAt: number;
   upcomingForUri: string | null;
   upcomingStale: boolean;
+  burstUntil: number;
+  // A music fade in progress (bumping the token cancels it).
+  fadeToken: number;
+  fading: boolean;
+  fadingSince: number;
 };
 
 const g = globalThis as unknown as { _kioskEngine?: EngineState; _kioskTick?: () => Promise<void> };
@@ -57,6 +65,10 @@ function freshState(): EngineState {
     upcomingAt: 0,
     upcomingForUri: null,
     upcomingStale: true,
+    burstUntil: 0,
+    fadeToken: 0,
+    fading: false,
+    fadingSince: 0,
   };
 }
 
@@ -76,12 +88,152 @@ export function ensureEngine() {
   const s = state();
   if (s.started) return;
   s.started = true;
+  recoverAfterRestart();
   schedule(0);
 }
 
-// Run a tick now (after a user action) instead of waiting for the next poll.
+// ---- Surviving restarts ----------------------------------------------------
+// Engine memory is in-process. What must outlive a server restart (or a kiosk
+// reload) is mirrored into the settings table: the music hold (ducked / paused
+// for a clip), the player choice, and where playback was.
+
+const HOLD_DUCK = "hold_duck";
+const HOLD_PAUSED = "hold_paused";
+
+function recoverAfterRestart() {
+  const s = state();
+  // A track we'd already put in Spotify's queue: keep tracking it.
+  const handed = upNext().filter((i) => i.status === "handed_off");
+  const track = handed.find((i) => i.kind === "track" && i.uri);
+  if (track) s.memory = { ...s.memory, handoff: { id: track.id, uri: track.uri!, trackChanges: 0 } };
+  // A queued clip that was mid-play: it's gone; let the music carry on.
+  for (const c of handed.filter((i) => i.kind === "clip")) setStatus(c.id, "played");
+  // Music left lowered or paused for a clip: bring it back once we can talk to Spotify.
+  if (getSetting(HOLD_DUCK) || getSetting(HOLD_PAUSED) || handed.some((i) => i.kind === "clip"))
+    setTimeout(() => releaseHolds().catch((e) => logError("engine", e, "restoring music after restart")), 1500);
+}
+
+// Drop any clip hold: restore the volume and/or resume. Used after a server restart
+// and when a kiosk page loads (a reload mid-clip would otherwise leave it held).
+export async function releaseHolds() {
+  const s = state();
+  const wasPaused = Boolean(s.pausedForInstant || getSetting(HOLD_PAUSED));
+  const wasDucked = Boolean(s.duck || getSetting(HOLD_DUCK));
+  s.pausedForInstant = null;
+  setSetting(HOLD_PAUSED, null);
+  if (wasDucked) await restoreVolume();
+  if (wasPaused) await api("PUT", "/me/player/play").catch(() => {});
+  if (wasPaused || wasDucked) poke();
+}
+
+export function holdActive() {
+  const s = state();
+  return Boolean(s.duck || s.pausedForInstant);
+}
+
+// The player the kiosk should play on: "browser" (this kiosk tab's Web Playback SDK
+// device, whose id changes on every reload) or a Spotify Connect device id.
+export function rememberPlayer(pref: string) {
+  setSetting("player_pref", pref);
+}
+
+type ResumePoint = { uri: string; contextUri: string | null; progressMs: number; playing: boolean; at: number };
+
+function saveResumePoint(pb: SpPlayback) {
+  if (!pb.item) return;
+  const point: ResumePoint = {
+    uri: pb.item.uri,
+    contextUri: pb.context?.uri ?? null,
+    progressMs: pb.progress_ms ?? 0,
+    playing: pb.is_playing,
+    at: Date.now(),
+  };
+  setSetting("resume_point", JSON.stringify(point));
+}
+
+// The kiosk paused or faded the music out on purpose: nothing to resume.
+export function markStopped() {
+  const p = resumePoint();
+  if (p) setSetting("resume_point", JSON.stringify({ ...p, playing: false, at: Date.now() }));
+}
+
+function resumePoint(): ResumePoint | null {
+  try {
+    const p = JSON.parse(getSetting("resume_point") ?? "null") as ResumePoint | null;
+    return p && Date.now() - p.at < RESUME_MAX_AGE_MS ? p : null;
+  } catch {
+    return null;
+  }
+}
+
+// What a kiosk page should offer to pick back up: music was playing (and the kiosk
+// didn't stop it), but nothing is playing now. `deviceId` is the player that went
+// quiet, so a reloaded page can tell its own dead browser player apart from a
+// pause on some other device.
+export function resumeOffer() {
+  const s = state();
+  const pref = getSetting("player_pref");
+  const point = resumePoint();
+  if (!point?.playing) return null;
+  if (s.playback?.is_playing) return null;
+  const dev = s.playback?.device;
+  return { pref: pref ?? "browser", uri: point.uri, deviceId: dev?.id ?? null, deviceName: dev?.name ?? null };
+}
+
+// Pick playback back up on `deviceId` (the new browser player after a reload):
+// transfer if Spotify still has the session, else replay the saved point.
+// Pick the music back up. Without a deviceId (the page's player never reported
+// ready), use the kiosk's browser player from Spotify's device list — Spotify
+// keeps the same id for it across reloads.
+export async function resumeOn(deviceId?: string) {
+  const s = state();
+  const point = resumePoint();
+  if (!deviceId) {
+    const { devices } = (await api<{ devices: { id: string | null; name: string; is_active: boolean }[] }>(
+      "GET",
+      "/me/player/devices",
+    )) ?? { devices: [] };
+    const kiosk = devices
+      .filter((d) => d.id && d.name.startsWith("Music Kiosk"))
+      .sort((a, b) => Number(b.is_active) - Number(a.is_active))[0];
+    if (!kiosk?.id) return false;
+    deviceId = kiosk.id;
+  }
+  const pb = await getPlayback().catch(() => null);
+  const playFromPoint = async () => {
+    if (!point) return false;
+    const elapsed = point.playing ? Date.now() - point.at : 0;
+    const position = Math.max(0, point.progressMs + elapsed - 3000); // back up a beat
+    const body = point.contextUri
+      ? { context_uri: point.contextUri, offset: { uri: point.uri }, position_ms: position }
+      : { uris: [point.uri], position_ms: position };
+    await api("PUT", "/me/player/play", body, { device_id: deviceId });
+    return true;
+  };
+  if (pb?.item) {
+    // Spotify still holds the song (paused): move it here and play. If the
+    // transfer fails, rebuild playback from the saved point instead.
+    try {
+      await api("PUT", "/me/player", { device_ids: [deviceId], play: true });
+    } catch (e) {
+      logError("engine", e, "resume: transfer failed, replaying from saved point");
+      if (!(await playFromPoint())) throw e;
+    }
+  } else if (!(await playFromPoint())) return false;
+  s.upcomingStale = true;
+  poke();
+  return true;
+}
+
+// Run a tick now (after a user action) instead of waiting for the next poll, then
+// keep re-reading Spotify quickly for a few seconds: it takes a beat to report a
+// play/pause/skip, and the UI should catch it the moment it does.
+const BURST_MS = 3000;
+const BURST_POLL_MS = 400;
 export function poke() {
-  state().upcomingStale = true;
+  const s = state();
+  s.upcomingStale = true;
+  s.burstUntil = Date.now() + BURST_MS;
   schedule(50);
 }
 
@@ -103,6 +255,10 @@ async function tick() {
       s.playback = await getPlayback();
       s.playbackAt = Date.now();
       s.error = null;
+      // Only remember *playing* moments: when a browser player dies (its tab reloaded),
+      // Spotify reports the song as paused on the dead device, which must not read as
+      // "someone stopped the music". Deliberate stops go through markStopped().
+      if (s.playback?.item && s.playback.is_playing) saveResumePoint(s.playback);
 
       const pb = s.playback;
       const h = head();
@@ -148,6 +304,7 @@ async function tick() {
     s.error = message;
     delay = e instanceof SpotifyError && e.status === 429 ? 10_000 : 3000;
   }
+  if (Date.now() < (s.burstUntil ?? 0)) delay = Math.min(delay, BURST_POLL_MS);
   schedule(delay);
 }
 
@@ -251,19 +408,37 @@ export async function playNow(id: string) {
 // Jump to a track in the "Then from <playlist>" list. Spotify has no "skip to queue
 // position", so restart the current context at that track (keeps the playlist and
 // anything already in Spotify's queue); if that's refused, press next enough times.
-export async function skipToUpcoming(uri: string, index: number) {
+// Jump to a track in the upcoming playlist. `paused` cues it up at 0:00 without
+// playing it: Spotify can only jump by starting playback, so the music is muted
+// for the jump, paused, then put back to the music volume.
+export async function skipToUpcoming(uri: string, index: number, paused = false) {
   const s = state();
   const ctx = s.playback?.context?.uri;
-  const deviceId = s.playback?.device?.id ?? undefined;
-  try {
-    if (!ctx) throw new Error("no context");
-    await api("PUT", "/me/player/play", { context_uri: ctx, offset: { uri } }, { device_id: deviceId });
-  } catch {
-    // Our handed-off track sits ahead of the playlist in Spotify's queue.
-    const skips = index + 1 + (s.memory.handoff ? 1 : 0);
-    for (let i = 0; i < skips; i++) await api("POST", "/me/player/next");
+  const dev = s.playback?.device;
+  const deviceId = dev?.id ?? undefined;
+  const mute = paused && dev?.supports_volume;
+  if (mute) {
+    s.fadeToken++; // cancel any fade in flight
+    await applyVolume(0).catch(() => {});
   }
-  poke();
+  try {
+    try {
+      if (!ctx) throw new Error("no context");
+      await api("PUT", "/me/player/play", { context_uri: ctx, offset: { uri } }, { device_id: deviceId });
+    } catch {
+      // Our handed-off track sits ahead of the playlist in Spotify's queue.
+      const skips = index + 1 + (s.memory.handoff ? 1 : 0);
+      for (let i = 0; i < skips; i++) await api("POST", "/me/player/next");
+    }
+    if (paused) {
+      await api("PUT", "/me/player/pause");
+      await api("PUT", "/me/player/seek", undefined, { position_ms: "0" }).catch(() => {});
+      markStopped();
+    }
+  } finally {
+    if (mute) await applyVolume(musicVolume()).catch(() => {});
+    poke();
+  }
 }
 
 // ---- Instant clips (fired from a pad, not queued) --------------------------
@@ -278,6 +453,7 @@ export async function instantPause() {
   if (!s.playback?.is_playing) return { paused: false };
   await api("PUT", "/me/player/pause");
   s.pausedForInstant = { holders: 1 };
+  setSetting(HOLD_PAUSED, "1");
   return { paused: true };
 }
 
@@ -286,6 +462,7 @@ export async function instantResume() {
   if (!s.pausedForInstant) return;
   if (--s.pausedForInstant.holders > 0) return;
   s.pausedForInstant = null;
+  setSetting(HOLD_PAUSED, null);
   await api("PUT", "/me/player/play").catch(() => {});
   poke();
 }
@@ -316,6 +493,7 @@ function musicVolume(): number {
 export async function setMusicVolume(percent: number) {
   const s = state();
   const v = Math.max(0, Math.min(100, Math.round(percent)));
+  s.fadeToken++; // a manual change wins over a fade in progress
   updateSettings({ musicVolume: v });
   await applyVolume(s.duck ? duckedLevel(v) : v);
 }
@@ -328,11 +506,10 @@ async function volumeHousekeeping() {
   if (!dev?.supports_volume || dev.volume_percent == null) return;
   if (s.duck && Date.now() - s.duck.since > DUCK_WATCHDOG_MS) {
     logError("engine", "duck left on too long — restoring the music volume");
-    s.duck = null;
-    await applyVolume(musicVolume());
+    await restoreVolume();
     return;
   }
-  if (!s.duck && Date.now() - s.volumeSetAt > VOLUME_SYNC_QUIET_MS && dev.volume_percent !== musicVolume())
+  if (!s.duck && !s.fading && Date.now() - s.volumeSetAt > VOLUME_SYNC_QUIET_MS && dev.volume_percent !== musicVolume())
     updateSettings({ musicVolume: dev.volume_percent });
 }
 
@@ -350,6 +527,7 @@ export async function duck(): Promise<"volume" | "unsupported"> {
   const base = musicVolume();
   // Record the duck before the call, so a failure after Spotify acted still restores.
   s.duck = { holders: 1, since: Date.now() };
+  setSetting(HOLD_DUCK, "1");
   try {
     await applyVolume(duckedLevel(base));
   } catch (e) {
@@ -372,6 +550,7 @@ export async function unduck() {
 export async function restoreVolume() {
   const s = state();
   s.duck = null;
+  setSetting(HOLD_DUCK, null);
   const base = musicVolume();
   try {
     await applyVolume(base);
@@ -380,6 +559,67 @@ export async function restoreVolume() {
     await new Promise((r) => setTimeout(r, 700));
     await applyVolume(base).catch((e2) => logError("engine", e2, "restoring music volume failed twice"));
   }
+}
+
+// ---- Music fades ------------------------------------------------------------
+
+// Step Spotify's volume from → to over ms. Returns false if another fade (or a
+// manual volume change) took over.
+async function ramp(from: number, to: number, ms: number): Promise<boolean> {
+  const s = state();
+  const token = ++s.fadeToken;
+  const steps = Math.max(1, Math.round(ms / FADE_STEP_MS));
+  for (let i = 1; i <= steps; i++) {
+    if (s.fadeToken !== token) return false;
+    await applyVolume(from + ((to - from) * i) / steps);
+    if (i < steps) await new Promise((r) => setTimeout(r, ms / steps));
+  }
+  return s.fadeToken === token;
+}
+
+// Fade the music out (then pause, and put the volume back for next time) or in
+// (from silence if paused, else from wherever it is, up to the music volume).
+// Runs in the background; on players without volume control it just pauses/plays.
+export async function fadeMusic(dir: "in" | "out"): Promise<"fading" | "instant"> {
+  const s = state();
+  const dev = s.playback?.device;
+  const { musicFadeInMs, musicFadeOutMs } = getSettings();
+  if (!dev?.supports_volume) {
+    await api("PUT", dir === "out" ? "/me/player/pause" : "/me/player/play");
+    if (dir === "out") markStopped();
+    poke();
+    return "instant";
+  }
+  const base = musicVolume();
+  const current = dev.volume_percent ?? base;
+  const run = async () => {
+    s.fading = true;
+    s.fadingSince = Date.now();
+    try {
+      if (dir === "out") {
+        if (await ramp(current, 0, musicFadeOutMs)) {
+          await api("PUT", "/me/player/pause");
+          markStopped();
+          await applyVolume(base);
+        }
+      } else {
+        const from = s.playback?.is_playing ? current : 0;
+        if (!s.playback?.is_playing) {
+          await applyVolume(0);
+          await api("PUT", "/me/player/play");
+        }
+        await ramp(from, base, musicFadeInMs);
+      }
+    } catch (e) {
+      logError("engine", e, `music fade ${dir}`);
+      await applyVolume(base).catch(() => {});
+    } finally {
+      s.fading = false;
+      poke();
+    }
+  };
+  void run();
+  return "fading";
 }
 
 // Snapshot for the UI.
@@ -401,6 +641,10 @@ export function snapshot() {
       : null,
     nowPlayingItem: s.memory.nowPlayingId ? getItem(s.memory.nowPlayingId) : null,
     ducked: Boolean(s.duck),
+    // Belt and braces: never show a fade that has outlived any real fade.
+    fading: s.fading && Date.now() - (s.fadingSince ?? 0) < 60_000,
+    holdActive: holdActive(),
+    resumeOffer: resumeOffer(),
     musicVolume: getSettings().musicVolume ?? pb?.device?.volume_percent ?? null,
     upcoming: s.upcoming,
     errors: recentErrors().slice(0, 15),

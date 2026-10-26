@@ -2,7 +2,7 @@
 // Web Playback SDK: turns this browser tab into a Spotify Connect device
 // ("Music Kiosk"). Desktop browsers only; on iPad/phone the Spotify app plays.
 import { useEffect, useRef, useState } from "react";
-import { sdkSupported } from "@/lib/client";
+import { kioskChanged, sdkSupported } from "@/lib/client";
 
 type SdkPlayer = {
   connect(): Promise<boolean>;
@@ -44,6 +44,9 @@ export function useSpotifyPlayer(enabled: boolean) {
       });
       player.addListener("ready", ({ device_id }) => setDeviceId(device_id ?? null));
       player.addListener("not_ready", () => setDeviceId(null));
+      // This tab is playing: it hears about play/pause/track changes instantly,
+      // well before Spotify's Web API reports them. Nudge the page to catch up.
+      player.addListener("player_state_changed", () => kioskChanged(true));
       for (const ev of ["initialization_error", "authentication_error", "account_error"])
         player.addListener(ev, ({ message }) => setError(message ?? ev));
       player.connect();

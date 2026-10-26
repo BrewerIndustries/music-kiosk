@@ -1,6 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
 import { api } from "@/lib/spotify";
-import { duck, instantPause, instantResume, poke, restoreVolume, setMusicVolume, skipToUpcoming, unduck } from "@/lib/engine";
+import {
+  duck,
+  fadeMusic,
+  markStopped,
+  instantPause,
+  instantResume,
+  poke,
+  releaseHolds,
+  rememberPlayer,
+  restoreVolume,
+  resumeOn,
+  setMusicVolume,
+  skipToUpcoming,
+  unduck,
+} from "@/lib/engine";
 import { getSettings } from "@/lib/settings";
 import { adminRoute } from "@/lib/auth";
 
@@ -8,8 +22,10 @@ export const dynamic = "force-dynamic";
 
 // POST /api/player { action, ... } — transport controls + clip helpers.
 //   play | pause | next | previous | volume {percent} | restoreVolume | shuffle {on}
-//   transfer {deviceId, play?} | startPlaylist {deviceId?}
-//   skipTo {uri, index}   (jump to a track in the upcoming playlist list)
+//   transfer {deviceId, play?, browser?} | startPlaylist {deviceId?}
+//   fadeIn | fadeOut   (music)  ·  resumeOn {deviceId?}  ·  releaseHolds
+//   skipTo {uri, index, paused?}   (jump to a track in the upcoming playlist list;
+//                                   paused cues it up without playing)
 //   duck | unduck | instantPause | instantResume   (used around instant clips)
 export function POST(req: NextRequest) {
   return adminRoute(req, async () => {
@@ -22,6 +38,7 @@ export function POST(req: NextRequest) {
         break;
       case "pause":
         await api("PUT", "/me/player/pause");
+        markStopped();
         break;
       case "next":
         await api("POST", "/me/player/next");
@@ -41,6 +58,18 @@ export function POST(req: NextRequest) {
       case "transfer":
         if (!deviceId) return NextResponse.json({ error: "deviceId required" }, { status: 400 });
         await api("PUT", "/me/player", { device_ids: [deviceId], play: b.play !== false });
+        // Remember the choice so a reload can pick the music back up on the same kind of player.
+        rememberPlayer(b.browser === true ? "browser" : deviceId);
+        break;
+      case "fadeIn":
+      case "fadeOut":
+        result = { mode: await fadeMusic(b.action === "fadeIn" ? "in" : "out") };
+        break;
+      case "resumeOn":
+        result = { resumed: await resumeOn(deviceId) };
+        break;
+      case "releaseHolds":
+        await releaseHolds();
         break;
       case "startPlaylist": {
         const { playlistUri } = getSettings();
@@ -53,7 +82,7 @@ export function POST(req: NextRequest) {
       case "skipTo":
         if (typeof b.uri !== "string" || !b.uri.startsWith("spotify:track:"))
           return NextResponse.json({ error: "uri required" }, { status: 400 });
-        await skipToUpcoming(b.uri, Math.max(0, Number(b.index) || 0));
+        await skipToUpcoming(b.uri, Math.max(0, Number(b.index) || 0), b.paused === true);
         break;
       case "duck":
         result = { method: await duck() };
