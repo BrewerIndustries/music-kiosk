@@ -85,19 +85,29 @@ button:disabled { cursor: default; opacity: 0.35; }
   @apply ml-1 inline-flex min-w-[1.1rem] items-center justify-center rounded-full bg-accent px-1 text-[10px] font-semibold text-bg;
 }
 
-/* Sound pads: colour comes from --pad (Soundboard accent). */
-.pad {
-  @apply flex aspect-[4/3] items-center justify-center rounded-2xl p-3 text-center text-base font-semibold;
+/* Sound cards: colour comes from --pad (Soundboard accent). The big area fires
+   the pad in the selected mode; the button row is play/pause, stop, fade in/out. */
+.pad-card {
+  @apply flex flex-col overflow-hidden rounded-2xl;
   background: color-mix(in srgb, var(--pad) 18%, var(--color-card));
   border: 1px solid color-mix(in srgb, var(--pad) 45%, transparent);
   color: color-mix(in srgb, var(--pad) 70%, white);
+}
+.pad-card.pad-playing {
+  background: color-mix(in srgb, var(--pad) 32%, var(--color-card));
+  box-shadow: 0 0 0 2px var(--pad);
+}
+.pad-main {
+  @apply flex min-h-24 flex-1 flex-col items-center justify-center gap-1 p-3 text-center text-base font-semibold;
   transition: transform 80ms ease;
 }
-.pad:active { transform: scale(0.96); }
-.pad-playing {
-  background: color-mix(in srgb, var(--pad) 40%, var(--color-card));
-  box-shadow: 0 0 0 3px var(--pad);
+.pad-main:active { transform: scale(0.97); }
+.pad-status { @apply text-[11px] font-medium opacity-75; }
+.pad-btn {
+  @apply flex h-9 items-center justify-center rounded-lg text-sm;
+  background: color-mix(in srgb, var(--pad) 14%, transparent);
 }
+.pad-btn:hover:not(:disabled) { background: color-mix(in srgb, var(--pad) 30%, transparent); }
 
 /* DEV environment banner (amber) — only rendered off the prod port. */
 .env-banner {

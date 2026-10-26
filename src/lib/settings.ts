@@ -8,6 +8,8 @@ export type KioskSettings = {
   duckPercent: number; // music drops to this % of its volume while a clip plays over it
   musicVolume: number | null; // the music's normal volume (restored after ducking)
   clipVolume: number; // soundboard clip volume, 0–100
+  fadeInMs: number; // sound card "fade in" duration
+  fadeOutMs: number; // sound card "fade out" duration
   requireApproval: boolean; // guest requests wait for admin approval
   partyCode: string; // in the guest link; rotate to lock old QR codes out
   guestBaseUrl: string | null; // override for the QR link (e.g. the public guest site)
@@ -30,6 +32,8 @@ export function getSettings(): KioskSettings {
     duckPercent: Number(getSetting("duck_percent") ?? 30),
     musicVolume: getSetting("music_volume") != null ? Number(getSetting("music_volume")) : null,
     clipVolume: Number(getSetting("clip_volume") ?? 100),
+    fadeInMs: Number(getSetting("fade_in_ms") ?? 2000),
+    fadeOutMs: Number(getSetting("fade_out_ms") ?? 3000),
     requireApproval: getSetting("require_approval") === "1",
     partyCode,
     guestBaseUrl: getSetting("guest_base_url"),
@@ -45,6 +49,8 @@ export function updateSettings(p: Record<string, unknown>) {
     setSetting("music_volume", String(Math.max(0, Math.min(100, Math.round(p.musicVolume)))));
   if (typeof p.clipVolume === "number")
     setSetting("clip_volume", String(Math.max(0, Math.min(100, Math.round(p.clipVolume)))));
+  for (const [k, col] of [["fadeInMs", "fade_in_ms"], ["fadeOutMs", "fade_out_ms"]] as const)
+    if (typeof p[k] === "number") setSetting(col, String(Math.max(100, Math.min(30_000, Math.round(p[k] as number)))));
   if (typeof p.requireApproval === "boolean") setSetting("require_approval", p.requireApproval ? "1" : "0");
   if (p.rotatePartyCode === true) setSetting("party_code", randomCode());
   if ("guestBaseUrl" in p)

@@ -38,8 +38,13 @@ It's a responsive web app: every feature works on a **laptop, iPad, or phone**. 
   value (never a level read back from Spotify, which can be stale). The setting
   follows changes made elsewhere (Spotify app, device buttons). Ducking lowers the
   music to *Settings ▸ duck %* of it; failed restores retry, and a watchdog
-  restores after 3 min if a duck is ever left on. Clip volume is browser-side
-  (iOS ignores it, so clips follow the device buttons there).
+  restores after 3 min if a duck is ever left on. Clip volume is a Web Audio master gain.
+- **Sound cards:** tapping a card fires it in the selected mode (restarts it if
+  live); its button row is ▶/⏸, ■ stop, fade in, fade out (durations in
+  *Settings ▸ Sounds*). Clips run through Web Audio (per-clip gain for fades →
+  master gain for the Sounds volume), which also makes volume/fades work on iOS. A
+  clip holds the music (paused or ducked) until it's stopped or ends; pausing a
+  clip keeps the hold.
 - **Errors** from routes and the engine go to the server log and *Settings ▸ Recent errors*.
 - **Soundboard** stays the source of record for clips. The kiosk reads its open
   `/api/boards` and proxies `/api/audio/<key>` (`SOUNDBOARD_URL`).

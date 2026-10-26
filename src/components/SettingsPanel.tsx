@@ -58,6 +58,16 @@ export function SettingsPanel({
             browser, the Spotify desktop app); on iPad/iPhone, iOS lowers the music itself.
           </span>
         </label>
+        <FadeSetting
+          label="Fade in"
+          value={s?.fadeInMs ?? 2000}
+          onSave={(ms) => save({ fadeInMs: ms })}
+        />
+        <FadeSetting
+          label="Fade out"
+          value={s?.fadeOutMs ?? 3000}
+          onSave={(ms) => save({ fadeOutMs: ms })}
+        />
         <div className="flex items-center justify-between gap-4">
           <span>
             Play queued clips on this device
@@ -150,5 +160,27 @@ export function SettingsPanel({
         </div>
       </section>
     </div>
+  );
+}
+
+// Seconds slider for a sound card's fade-in / fade-out duration (saved as ms).
+function FadeSetting({ label, value, onSave }: { label: string; value: number; onSave: (ms: number) => void }) {
+  const [sec, setSec] = useState(value / 1000);
+  const commit = () => onSave(Math.round(sec * 1000));
+  return (
+    <label className="block">
+      {label} duration: <span className="font-semibold">{sec.toFixed(1)} s</span>
+      <input
+        type="range"
+        min={0.5}
+        max={15}
+        step={0.5}
+        value={sec}
+        onChange={(e) => setSec(Number(e.target.value))}
+        onPointerUp={commit}
+        onKeyUp={commit}
+        className="mt-2 w-full accent-[var(--accent)]"
+      />
+    </label>
   );
 }

@@ -1,16 +1,30 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { call } from "@/lib/client";
-import { playClip, stopAllClips, type ClipMode } from "@/lib/clipPlayer";
+import {
+  activeClipCount,
+  clipStatus,
+  clipsVersion,
+  fadeInClip,
+  fadeOutClip,
+  pauseClip,
+  resumeClip,
+  startClip,
+  stopAllClips,
+  stopClip,
+  subscribeClips,
+  type ClipMode,
+  type ClipStatus,
+} from "@/lib/clipPlayer";
 import type { SbBoard, SbSound } from "@/lib/soundboard";
-import type { Notify } from "./types";
+import type { KioskState, Notify } from "./types";
 
 type Mode = ClipMode | "queue";
 
 const MODES: { id: Mode; label: string; hint: string }[] = [
   { id: "pause", label: "⏸ Pause & play", hint: "Pauses the song, plays the clip, picks the song back up." },
   { id: "duck", label: "🔉 Play over", hint: "Turns the music down and plays the clip over it." },
-  { id: "queue", label: "＋ Up Next", hint: "Queues the clip to play after the current song." },
+  { id: "queue", label: "＋ Up Next", hint: "Tapping a pad queues it after the current song; its buttons still play it live (as Pause & play)." },
 ];
 
 // Soundboard accent keys (src/lib/types.ts there) → pad colours on the dark kiosk.
@@ -35,13 +49,16 @@ function loadMode(): Mode {
   return "pause";
 }
 
-export function SoundsPanel({ notify }: { notify: Notify }) {
+export function SoundsPanel({ state, notify }: { state: KioskState; notify: Notify }) {
   const [boards, setBoards] = useState<SbBoard[] | null>(null);
   const [manageUrl, setManageUrl] = useState<string | null>(null);
   const [boardId, setBoardId] = useState<string | null>(null);
   const [pageId, setPageId] = useState<string | null>(null);
   const [mode, setModeState] = useState<Mode>("pause");
-  const [playing, setPlaying] = useState<Record<string, number>>({});
+  // Re-render whenever any clip changes state (playing, paused, fading…).
+  useSyncExternalStore(subscribeClips, clipsVersion, () => 0);
+  const fadeInMs = state.settings?.fadeInMs ?? 2000;
+  const fadeOutMs = state.settings?.fadeOutMs ?? 3000;
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -73,16 +90,27 @@ export function SoundsPanel({ notify }: { notify: Notify }) {
         .catch((e) => notify(e.message));
       return;
     }
-    setPlaying((p) => ({ ...p, [s.id]: (p[s.id] ?? 0) + 1 }));
-    try {
-      const note = await playClip(s.key, mode);
-      if (note) notify(note);
-    } finally {
-      setPlaying((p) => ({ ...p, [s.id]: Math.max(0, (p[s.id] ?? 1) - 1) }));
-    }
+    const note = await startClip(s.id, s.key, mode);
+    if (note) notify(note);
   };
 
-  const anyPlaying = Object.values(playing).some((n) => n > 0);
+  // The card buttons always play live; in Up Next mode they use Pause & play.
+  const liveMode: ClipMode = mode === "queue" ? "pause" : mode;
+  const showNote = (p: Promise<string | null> | void) => p?.then((n) => n && notify(n));
+  const controls = (s: SbSound) => ({
+    status: clipStatus(s.id),
+    onPlayPause: () => {
+      const st = clipStatus(s.id);
+      if (st === "stopped") showNote(startClip(s.id, s.key, liveMode));
+      else if (st === "paused") resumeClip(s.id);
+      else pauseClip(s.id);
+    },
+    onStop: () => stopClip(s.id),
+    onFadeIn: () => showNote(fadeInClip(s.id, s.key, liveMode, fadeInMs)),
+    onFadeOut: () => fadeOutClip(s.id, fadeOutMs),
+  });
+
+  const anyPlaying = activeClipCount() > 0;
 
   return (
     <section className="card p-4">
@@ -155,14 +183,14 @@ export function SoundsPanel({ notify }: { notify: Notify }) {
       {page && page.sounds.length > 0 && (
         <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-4">
           {page.sounds.map((s) => (
-            <button
+            <SoundCard
               key={s.id}
-              onClick={() => fire(s)}
-              className={`pad ${playing[s.id] ? "pad-playing" : ""}`}
-              style={{ "--pad": ACCENTS[s.accent] ?? ACCENTS.purple } as React.CSSProperties}
-            >
-              <span className="line-clamp-3 break-words">{s.label}</span>
-            </button>
+              sound={s}
+              color={ACCENTS[s.accent] ?? ACCENTS.purple}
+              queueMode={mode === "queue"}
+              onFire={() => fire(s)}
+              {...controls(s)}
+            />
           ))}
         </div>
       )}
@@ -180,5 +208,72 @@ export function SoundsPanel({ notify }: { notify: Notify }) {
         )}
       </div>
     </section>
+  );
+}
+
+const STATUS_LABEL: Partial<Record<ClipStatus, string>> = {
+  playing: "Playing",
+  paused: "Paused",
+  "fading-in": "Fading in…",
+  "fading-out": "Fading out…",
+};
+
+function SoundCard({
+  sound,
+  color,
+  queueMode,
+  status,
+  onFire,
+  onPlayPause,
+  onStop,
+  onFadeIn,
+  onFadeOut,
+}: {
+  sound: SbSound;
+  color: string;
+  queueMode: boolean;
+  status: ClipStatus;
+  onFire: () => void;
+  onPlayPause: () => void;
+  onStop: () => void;
+  onFadeIn: () => void;
+  onFadeOut: () => void;
+}) {
+  const live = status !== "stopped";
+  const playingNow = status === "playing" || status === "fading-in" || status === "fading-out";
+  return (
+    <div className={`pad-card ${live ? "pad-playing" : ""}`} style={{ "--pad": color } as React.CSSProperties}>
+      <button
+        onClick={onFire}
+        className="pad-main"
+        title={queueMode ? "Add to Up Next" : live ? "Restart" : "Play"}
+      >
+        <span className="line-clamp-2 break-words">{sound.label}</span>
+        <span className="pad-status">{STATUS_LABEL[status] ?? (queueMode ? "Tap to queue" : "\u00a0")}</span>
+      </button>
+      <div className="grid grid-cols-4 gap-1 p-1.5 pt-0">
+        <button className="pad-btn" onClick={onPlayPause} aria-label={playingNow ? "Pause" : "Play"} title={playingNow ? "Pause" : "Play"}>
+          {playingNow ? "⏸" : "▶"}
+        </button>
+        <button className="pad-btn" onClick={onStop} disabled={!live} aria-label="Stop" title="Stop">
+          ■
+        </button>
+        <button className="pad-btn" onClick={onFadeIn} aria-label="Fade in" title="Fade in">
+          <FadeIcon dir="in" />
+        </button>
+        <button className="pad-btn" onClick={onFadeOut} disabled={!live} aria-label="Fade out" title="Fade out">
+          <FadeIcon dir="out" />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// A volume ramp: rising for fade in, falling for fade out.
+function FadeIcon({ dir }: { dir: "in" | "out" }) {
+  return (
+    <svg viewBox="0 0 20 14" className="h-3.5 w-5" aria-hidden="true">
+      <path d={dir === "in" ? "M1 13 L19 13 L19 1 Z" : "M1 13 L19 13 L1 1 Z"} fill="currentColor" />
+    </svg>
   );
 }

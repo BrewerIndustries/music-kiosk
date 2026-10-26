@@ -133,7 +133,7 @@ export function Kiosk({ envLabel }: { envLabel: string | null }) {
           <SearchPanel state={state} notify={notify} />
         </div>
       )}
-      {tab === "sounds" && <SoundsPanel notify={notify} />}
+      {tab === "sounds" && <SoundsPanel state={state} notify={notify} />}
       {tab === "guests" && <GuestsPanel state={state} notify={notify} />}
       {tab === "settings" && (
         <SettingsPanel

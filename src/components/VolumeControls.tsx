@@ -2,13 +2,12 @@
 // Music + Sounds volume sliders. Ducking for clips is automatic; these set the
 // normal levels (the music slider is what ducking restores to).
 import { useEffect, useRef, useState } from "react";
-import { call, isIOS } from "@/lib/client";
+import { call } from "@/lib/client";
 import type { KioskState, Notify } from "./types";
 
 export function VolumeControls({ state, notify }: { state: KioskState; notify: Notify }) {
   const dev = state.playback?.device;
   const musicSupported = Boolean(dev?.supports_volume);
-  const ios = isIOS();
 
   const setMusic = (v: number) => call("POST", "/api/player", { action: "volume", percent: v });
   const setSounds = (v: number) => call("POST", "/api/settings", { clipVolume: v });
@@ -38,11 +37,7 @@ export function VolumeControls({ state, notify }: { state: KioskState; notify: N
       )}
       <div className="flex items-center gap-3">
         <span className="w-16 shrink-0 text-xs text-muted">🔊 Sounds</span>
-        {ios ? (
-          <span className="flex-1 text-xs text-muted">Use the device volume buttons</span>
-        ) : (
-          <Slider value={state.settings?.clipVolume ?? 100} onCommit={setSounds} notify={notify} />
-        )}
+        <Slider value={state.settings?.clipVolume ?? 100} onCommit={setSounds} notify={notify} />
       </div>
     </div>
   );
