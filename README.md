@@ -56,7 +56,10 @@ It's a responsive web app: every feature works on a **laptop, iPad, or phone**. 
   resume point (track, playlist, position); deliberate stops (pause, fade out, load
   paused) clear it. A reloaded kiosk page shows *Tap to resume the music*: one tap
   moves playback to the new browser player (Spotify keeps the same device id) or
-  replays the saved point ~3 s early. If the SDK never reports ready, the server finds
+  replays the saved point 2.5 s early. Track position is guarded three ways: the
+  saved place is taken before any player move and checked ~1 s after (seek back if
+  Spotify restarted the song); while paused the saved place for a song only moves
+  forward (a re-registered player reports 0:00); downtime is not added on resume. If the SDK never reports ready, the server finds
   the "Music Kiosk" player itself after 6 s. Tab, board/page, search text and clip mode
   are kept in localStorage.
 - **Responsiveness:** taps show their result at once (optimistic play/pause and

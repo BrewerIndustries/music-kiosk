@@ -147,16 +147,59 @@ export function rememberPlayer(pref: string) {
 
 type ResumePoint = { uri: string; contextUri: string | null; progressMs: number; playing: boolean; at: number };
 
+// Saved on every poll. "playing" means the music *should* be playing: a pause
+// that the kiosk didn't make (the browser player dying with its tab) keeps the
+// earlier "playing" for the same song; the kiosk's own stops go through markStopped().
 function saveResumePoint(pb: SpPlayback) {
   if (!pb.item) return;
+  const prev = resumePoint();
   const point: ResumePoint = {
     uri: pb.item.uri,
     contextUri: pb.context?.uri ?? null,
     progressMs: pb.progress_ms ?? 0,
-    playing: pb.is_playing,
+    playing: pb.is_playing || Boolean(prev?.playing && prev.uri === pb.item.uri),
     at: Date.now(),
   };
+  // While paused, the place for the same song only moves forward: a browser player
+  // re-registering after a reload can report the song at 0:00, which must not
+  // overwrite where it really was.
+  if (prev && !pb.is_playing && prev.uri === point.uri && point.progressMs <= prev.progressMs && prev.playing === point.playing)
+    return;
   setSetting("resume_point", JSON.stringify(point));
+}
+
+// Where to pick up: where the music stopped, backed up a beat. (Not "plus the time
+// it was down" — after a reload you want to hear the bit you missed.)
+const RESUME_BACKUP_MS = 2500;
+function resumePosition(p: ResumePoint) {
+  return Math.max(0, p.progressMs - RESUME_BACKUP_MS);
+}
+
+// After the music moves to a (new) player, make sure Spotify kept our place: a
+// re-registered browser player sometimes starts the song from 0:00. Only acts
+// when the same song is playing well short of where it was. Pass the place as it
+// was *before* the move (placeBeforeMove()) — once a restarted song plays, the
+// engine's next poll saves 0:00 as the place.
+export function placeBeforeMove() {
+  return resumePoint();
+}
+export async function keepPosition(p: ResumePoint | null) {
+  if (!p || Date.now() - p.at > RESUME_MAX_AGE_MS) return;
+  const want = resumePosition(p);
+  if (want < 5000) return;
+  for (const wait of [800, 1500]) {
+    await new Promise((r) => setTimeout(r, wait));
+    const pb = await getPlayback().catch(() => null);
+    if (!pb?.item || pb.item.uri !== p.uri) return;
+    const at = pb.progress_ms ?? 0;
+    if (at >= want - 4000) return; // close enough: it kept its place
+    if (at > 1500 || pb.is_playing) {
+      await api("PUT", "/me/player/seek", undefined, { position_ms: String(want) }).catch((e) =>
+        logError("engine", e, "restoring track position"),
+      );
+      return;
+    }
+  }
 }
 
 // The kiosk paused or faded the music out on purpose: nothing to resume.
@@ -210,8 +253,7 @@ export async function resumeOn(deviceId?: string) {
   const pb = await getPlayback().catch(() => null);
   const playFromPoint = async () => {
     if (!point) return false;
-    const elapsed = point.playing ? Date.now() - point.at : 0;
-    const position = Math.max(0, point.progressMs + elapsed - 3000); // back up a beat
+    const position = resumePosition(point);
     const body = point.contextUri
       ? { context_uri: point.contextUri, offset: { uri: point.uri }, position_ms: position }
       : { uris: [point.uri], position_ms: position };
@@ -228,6 +270,7 @@ export async function resumeOn(deviceId?: string) {
       if (!(await playFromPoint())) throw e;
     }
   } else if (!(await playFromPoint())) return false;
+  await keepPosition(point);
   s.upcomingStale = true;
   poke();
   return true;
@@ -302,7 +345,7 @@ async function tick() {
       // Only remember *playing* moments: when a browser player dies (its tab reloaded),
       // Spotify reports the song as paused on the dead device, which must not read as
       // "someone stopped the music". Deliberate stops go through markStopped().
-      if (s.playback?.item && s.playback.is_playing) saveResumePoint(s.playback);
+      if (s.playback?.item) saveResumePoint(s.playback);
       if (s.playback?.item) notePlaying(summarize(s.playback.item), s.playback.progress_ms ?? 0);
 
       const pb = s.playback;

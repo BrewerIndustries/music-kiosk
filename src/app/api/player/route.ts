@@ -4,6 +4,8 @@ import {
   duck,
   fadeMusic,
   markStopped,
+  keepPosition,
+  placeBeforeMove,
   instantPause,
   instantResume,
   poke,
@@ -58,7 +60,9 @@ export function POST(req: NextRequest) {
         break;
       case "transfer":
         if (!deviceId) return NextResponse.json({ error: "deviceId required" }, { status: 400 });
+        const place = placeBeforeMove();
         await api("PUT", "/me/player", { device_ids: [deviceId], play: b.play !== false });
+        await keepPosition(place); // a fresh player can start the song over
         // Remember the choice so a reload can pick the music back up on the same kind of player.
         rememberPlayer(b.browser === true ? "browser" : deviceId);
         break;
