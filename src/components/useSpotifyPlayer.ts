@@ -8,6 +8,7 @@ type SdkPlayer = {
   connect(): Promise<boolean>;
   disconnect(): void;
   activateElement(): Promise<void>;
+  getVolume(): Promise<number>;
   addListener(event: string, cb: (arg: { device_id?: string; message?: string }) => void): void;
 };
 
@@ -51,6 +52,8 @@ export function useSpotifyPlayer(enabled: boolean) {
         player.addListener(ev, ({ message }) => setError(message ?? ev));
       player.connect();
       playerRef.current = player;
+      // Handy for checking the real output volume from the console while testing.
+      (window as unknown as { kioskPlayer?: SdkPlayer }).kioskPlayer = player;
     };
     if (window.Spotify) create();
     else {

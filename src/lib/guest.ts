@@ -23,3 +23,9 @@ export function takeGuestSlot(ip: string): boolean {
   db().prepare(`INSERT INTO guest_hits (ip, at) VALUES (?, ?)`).run(ip, Date.now());
   return true;
 }
+
+// A random id each guest phone makes for itself (localStorage), so it can find
+// its own requests again. Not a secret — it only reveals your own song list.
+export function validGuestId(id: unknown): string | null {
+  return typeof id === "string" && /^[A-Za-z0-9-]{8,64}$/.test(id) ? id : null;
+}

@@ -6,7 +6,16 @@ const DB_PATH = process.env.KIOSK_DB_PATH ?? join(process.cwd(), "data", "kiosk.
 
 // Next.js reloads modules on every change in dev; cache the connection so we
 // don't open a new handle (and re-run migrations) on each request.
-const globalForDb = globalThis as unknown as { _kioskDb?: Database.Database };
+const globalForDb = globalThis as unknown as { _kioskDb?: Database.Database; _kioskDbMigrated?: number };
+
+// Column additions for existing databases. Runs once per process (and again after
+// a hot reload that bumps MIGRATIONS), so a running kiosk picks them up.
+const MIGRATIONS = 1;
+function migrate(d: Database.Database) {
+  const cols = new Set((d.prepare(`PRAGMA table_info(queue)`).all() as { name: string }[]).map((c) => c.name));
+  // Which guest phone sent a request, so the guest page can show "your requests".
+  if (!cols.has("guest_id")) d.exec(`ALTER TABLE queue ADD COLUMN guest_id TEXT`);
+}
 
 function init(): Database.Database {
   mkdirSync(dirname(DB_PATH), { recursive: true });
@@ -46,6 +55,10 @@ function init(): Database.Database {
 
 export function db(): Database.Database {
   if (!globalForDb._kioskDb) globalForDb._kioskDb = init();
+  if (globalForDb._kioskDbMigrated !== MIGRATIONS) {
+    migrate(globalForDb._kioskDb);
+    globalForDb._kioskDbMigrated = MIGRATIONS;
+  }
   return globalForDb._kioskDb;
 }
 

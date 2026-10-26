@@ -13,6 +13,7 @@ import {
   resumeOn,
   setMusicVolume,
   skipToUpcoming,
+  startPlaylist,
   unduck,
 } from "@/lib/engine";
 import { getSettings } from "@/lib/settings";
@@ -22,7 +23,7 @@ export const dynamic = "force-dynamic";
 
 // POST /api/player { action, ... } — transport controls + clip helpers.
 //   play | pause | next | previous | volume {percent} | restoreVolume | shuffle {on}
-//   transfer {deviceId, play?, browser?} | startPlaylist {deviceId?}
+//   transfer {deviceId, play?, browser?} | startPlaylist {deviceId?, paused?}
 //   fadeIn | fadeOut   (music)  ·  resumeOn {deviceId?}  ·  releaseHolds
 //   skipTo {uri, index, paused?}   (jump to a track in the upcoming playlist list;
 //                                   paused cues it up without playing)
@@ -74,9 +75,7 @@ export function POST(req: NextRequest) {
       case "startPlaylist": {
         const { playlistUri } = getSettings();
         if (!playlistUri) return NextResponse.json({ error: "pick a playlist in Settings first" }, { status: 400 });
-        await api("PUT", "/me/player/play", { context_uri: playlistUri }, { device_id: deviceId });
-        // Loop the playlist so the backdrop never runs dry.
-        await api("PUT", "/me/player/repeat", undefined, { state: "context", device_id: deviceId }).catch(() => {});
+        await startPlaylist(playlistUri, deviceId, b.paused === true);
         break;
       }
       case "skipTo":

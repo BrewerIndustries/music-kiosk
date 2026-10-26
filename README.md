@@ -64,6 +64,24 @@ It's a responsive web app: every feature works on a **laptop, iPad, or phone**. 
   change the page polls every 250 ms and the engine re-reads Spotify every 400 ms
   for 3 s; the browser player's `player_state_changed` triggers the same burst.
   Spotify calls time out after 10 s so nothing hangs.
+- **Choosing a playlist** loads it paused at the first song (muted for the load);
+  ▶ or fade in starts it. ↺ Restart still plays from the top.
+- **Previously played** (top of the queue column, 3 rows, scrolls): every song that
+  played ≥ 10 s, from any source, kept in settings (`play_history`, last 50); ▶ plays
+  it again now, ⤒ puts it first in Up Next.
+- **Fade between songs** (*Settings ▸ Music*, off by default, up to 12 s): the engine
+  fades the last N s out and the next song in. Not a true overlap — Spotify's API
+  can't crossfade; the Spotify app's own Crossfade setting does that when it is the
+  player. Skipped while a clip holds the music, before a queued clip, or during a
+  manual fade; a `hold_transition` flag restores the volume after a crash.
+- **Guest page** shows now playing, every song in Up Next with its place (clips stay
+  a surprise), the next playlist songs, and *Your requests* with live status
+  (waiting / #N in line / up next / playing / played). Each phone keeps a random
+  `guest.id` in localStorage, stored on its requests (`queue.guest_id`);
+  `GET /api/guest/queue?code=&guest=`.
+- **Christmas theme:** evergreen/cranberry/gold tokens in `globals.css`, snow,
+  lights and sparkles in `src/components/Christmas.tsx` (CSS-only, honours reduced
+  motion), Mountains of Christmas title font via `next/font` (self-hosted).
 - **Errors** from routes and the engine go to the server log and *Settings ▸ Recent errors*.
 - **Soundboard** stays the source of record for clips. The kiosk reads its open
   `/api/boards` and proxies `/api/audio/<key>` (`SOUNDBOARD_URL`).

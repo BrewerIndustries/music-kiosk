@@ -20,6 +20,7 @@ export type QueueItem = {
   durationMs: number;
   requestedBy: string | null;
   source: "kiosk" | "guest";
+  guestId: string | null;
   createdAt: string;
   playedAt: string | null;
 };
@@ -37,6 +38,7 @@ type Row = {
   duration_ms: number;
   requested_by: string | null;
   source: "kiosk" | "guest";
+  guest_id: string | null;
   created_at: string;
   played_at: string | null;
 };
@@ -55,6 +57,7 @@ function fromRow(r: Row): QueueItem {
     durationMs: r.duration_ms,
     requestedBy: r.requested_by,
     source: r.source,
+    guestId: r.guest_id ?? null,
     createdAt: r.created_at,
     playedAt: r.played_at,
   };
@@ -108,6 +111,7 @@ export type NewItem = {
   durationMs?: number;
   requestedBy?: string | null;
   source?: "kiosk" | "guest";
+  guestId?: string | null;
 };
 
 function maxPosition(): number {
@@ -130,8 +134,8 @@ export function addItem(item: NewItem, opts: { status?: QueueStatus; atFront?: b
   db()
     .prepare(
       `INSERT INTO queue (id, kind, status, position, uri, clip_key, title, subtitle, art, duration_ms,
-                          requested_by, source, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                          requested_by, source, guest_id, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       id,
@@ -146,6 +150,7 @@ export function addItem(item: NewItem, opts: { status?: QueueStatus; atFront?: b
       item.durationMs ?? 0,
       item.requestedBy?.slice(0, 40) || null,
       item.source ?? "kiosk",
+      item.guestId ?? null,
       new Date().toISOString(),
     );
   return getItem(id)!;
@@ -183,6 +188,15 @@ export function approve(id: string) {
     maxPosition() + 1,
     id,
   );
+}
+
+// One guest phone's requests, newest first.
+export function guestRequests(guestId: string, limit = 20): QueueItem[] {
+  return (
+    db()
+      .prepare(`SELECT * FROM queue WHERE guest_id = ? ORDER BY created_at DESC LIMIT ?`)
+      .all(guestId, limit) as Row[]
+  ).map(fromRow);
 }
 
 export function isQueued(uri: string): boolean {

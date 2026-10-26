@@ -204,8 +204,8 @@ export function Kiosk({ envLabel }: { envLabel: string | null }) {
   if (!connected)
     return (
       <Splash>
-        <div className="text-5xl">🎶</div>
-        <h1 className="mt-4 text-2xl font-semibold">Music Kiosk</h1>
+        <div className="text-5xl">🎄</div>
+        <h1 className="festive mt-4 text-3xl">Music Kiosk</h1>
         <p className="mt-2 max-w-sm text-muted">Connect the Spotify Premium account that will play the music.</p>
         <a href="/api/spotify/login" className="btn btn-primary mt-6 px-6 py-3 text-base">Connect Spotify</a>
       </Splash>
@@ -263,7 +263,7 @@ export function Kiosk({ envLabel }: { envLabel: string | null }) {
       )}
 
       <header className="flex items-center justify-between px-4 pt-4 sm:px-6">
-        <div className="text-lg font-semibold tracking-tight">🎶 Music Kiosk</div>
+        <div className="festive text-2xl">🎄 Music Kiosk 🎅</div>
         <nav className="hidden gap-1 sm:flex">
           {TABS.map((t) => (
             <button
@@ -314,8 +314,8 @@ export function Kiosk({ envLabel }: { envLabel: string | null }) {
           onClick={start}
           className="fixed inset-0 z-30 flex flex-col items-center justify-center bg-bg/90 backdrop-blur"
         >
-          <div className="text-6xl">🎶</div>
-          <div className="mt-4 text-2xl font-semibold">
+          <div className="text-6xl">🎄</div>
+          <div className="festive mt-4 text-3xl">
             {ourPlayerDied ? "Tap to resume the music" : "Tap to start the kiosk"}
           </div>
           <div className="mt-2 max-w-xs text-sm text-muted">

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { clientIp, codeOk, GUEST_LIMIT, takeGuestSlot } from "@/lib/guest";
+import { clientIp, codeOk, GUEST_LIMIT, takeGuestSlot, validGuestId } from "@/lib/guest";
 import { api, summarize, type SpTrack } from "@/lib/spotify";
 import { addItem, isQueued } from "@/lib/queue";
 import { getSettings } from "@/lib/settings";
@@ -11,7 +11,7 @@ export const dynamic = "force-dynamic";
 // POST /api/guest/request { code, uri, name? } — a guest sends a song to Up Next.
 export function POST(req: NextRequest) {
   return handle(async () => {
-    const b = (await req.json()) as { code?: string; uri?: string; name?: string };
+    const b = (await req.json()) as { code?: string; uri?: string; name?: string; guestId?: string };
     if (!codeOk(b.code ?? null)) return NextResponse.json({ error: "This party link has expired." }, { status: 403 });
     const id = /^spotify:track:([A-Za-z0-9]{22})$/.exec(b.uri ?? "")?.[1];
     if (!id) return NextResponse.json({ error: "bad track" }, { status: 400 });
@@ -34,6 +34,7 @@ export function POST(req: NextRequest) {
         durationMs: t.durationMs,
         requestedBy: (b.name ?? "").trim() || "Guest",
         source: "guest",
+        guestId: validGuestId(b.guestId),
       },
       { status: requireApproval ? "pending" : "queued" },
     );

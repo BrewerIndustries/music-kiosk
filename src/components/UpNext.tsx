@@ -10,9 +10,44 @@ export function UpNext({ state, notify }: { state: KioskState; notify: Notify })
   const patch = (id: string, action: string) =>
     call("PATCH", `/api/queue/${id}`, { action }).catch((e) => notify(e.message));
   const remove = (id: string) => call("DELETE", `/api/queue/${id}`).catch((e) => notify(e.message));
+  const history = state.history ?? [];
+  // Put a song (from the history or the playlist) into Up Next: first, or playing now.
+  const enqueue = (t: TrackSummary, how: "top" | "playNow") => {
+    if (how === "playNow") expect({ track: t, playing: true });
+    return call("POST", "/api/queue", {
+      kind: "track",
+      uri: t.uri,
+      title: t.title,
+      subtitle: t.subtitle,
+      art: t.art,
+      durationMs: t.durationMs,
+      [how]: true,
+    })
+      .then(() => notify(how === "playNow" ? `Playing “${t.title}”` : `“${t.title}” is up next`))
+      .catch((e) => {
+        if (how === "playNow") expect({});
+        notify(e.message);
+      });
+  };
 
   return (
     <section className="card p-4">
+      {history.length > 0 && (
+        <>
+          <h2 className="mb-1 text-sm font-semibold uppercase tracking-wider text-muted">Previously played</h2>
+          {/* Three rows tall; scroll for more. */}
+          <ol className="mb-4 max-h-[8.25rem] space-y-0.5 overflow-y-auto overscroll-contain rounded-lg border border-line/60">
+            {history.map((t) => (
+              <PlaylistRow
+                key={`${t.uri}-${t.playedAt}`}
+                track={t}
+                onPlay={() => enqueue(t, "playNow")}
+                onTop={() => enqueue(t, "top")}
+              />
+            ))}
+          </ol>
+        </>
+      )}
       <div className="mb-2 flex items-center justify-between">
         <h2 className="text-sm font-semibold uppercase tracking-wider text-muted">Up Next</h2>
         {items.some((i) => i.status === "queued") && (
@@ -80,19 +115,7 @@ export function UpNext({ state, notify }: { state: KioskState; notify: Notify })
                       notify(e.message);
                     });
                 }}
-                onTop={() =>
-                  call("POST", "/api/queue", {
-                    kind: "track",
-                    uri: t.uri,
-                    title: t.title,
-                    subtitle: t.subtitle,
-                    art: t.art,
-                    durationMs: t.durationMs,
-                    top: true,
-                  })
-                    .then(() => notify(`“${t.title}” is up next`))
-                    .catch((e) => notify(e.message))
-                }
+                onTop={() => enqueue(t, "top")}
               />
             ))}
           </ol>
@@ -105,8 +128,8 @@ export function UpNext({ state, notify }: { state: KioskState; notify: Notify })
   );
 }
 
-// A song further down the playlist: play it now, load it paused, or pull it to
-// the top of Up Next.
+// A song from the playlist (or the history): play it now, load it paused (playlist
+// only), or pull it to the top of Up Next.
 function PlaylistRow({
   track,
   onPlay,
@@ -115,7 +138,7 @@ function PlaylistRow({
 }: {
   track: TrackSummary;
   onPlay: () => void;
-  onCue: () => void;
+  onCue?: () => void;
   onTop: () => void;
 }) {
   return (
@@ -136,7 +159,9 @@ function PlaylistRow({
         <span className="shrink-0 text-xs tabular-nums text-muted">{fmtTime(track.durationMs)}</span>
       </button>
       <button className="icon-btn" aria-label="Play now" title="Play now" onClick={onPlay}>▶</button>
-      <button className="icon-btn" aria-label="Load paused" title="Load it into the player, paused" onClick={onCue}>⏸</button>
+      {onCue && (
+        <button className="icon-btn" aria-label="Load paused" title="Load it into the player, paused" onClick={onCue}>⏸</button>
+      )}
       <button className="icon-btn" aria-label="Move to top of Up Next" title="Move to the top of Up Next" onClick={onTop}>⤒</button>
     </li>
   );

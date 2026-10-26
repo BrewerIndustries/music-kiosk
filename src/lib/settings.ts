@@ -12,6 +12,7 @@ export type KioskSettings = {
   fadeOutMs: number; // sound card "fade out" duration
   musicFadeInMs: number; // music "fade in" duration
   musicFadeOutMs: number; // music "fade out" duration
+  songTransitionMs: number; // fade between songs (0 = off)
   requireApproval: boolean; // guest requests wait for admin approval
   partyCode: string; // in the guest link; rotate to lock old QR codes out
   guestBaseUrl: string | null; // override for the QR link (e.g. the public guest site)
@@ -38,6 +39,7 @@ export function getSettings(): KioskSettings {
     fadeOutMs: Number(getSetting("fade_out_ms") ?? 3000),
     musicFadeInMs: Number(getSetting("music_fade_in_ms") ?? 3000),
     musicFadeOutMs: Number(getSetting("music_fade_out_ms") ?? 5000),
+    songTransitionMs: Number(getSetting("song_transition_ms") ?? 0),
     requireApproval: getSetting("require_approval") === "1",
     partyCode,
     guestBaseUrl: getSetting("guest_base_url"),
@@ -60,6 +62,8 @@ export function updateSettings(p: Record<string, unknown>) {
     ["musicFadeOutMs", "music_fade_out_ms"],
   ] as const)
     if (typeof p[k] === "number") setSetting(col, String(Math.max(100, Math.min(30_000, Math.round(p[k] as number)))));
+  if (typeof p.songTransitionMs === "number")
+    setSetting("song_transition_ms", String(Math.max(0, Math.min(12_000, Math.round(p.songTransitionMs)))));
   if (typeof p.requireApproval === "boolean") setSetting("require_approval", p.requireApproval ? "1" : "0");
   if (p.rotatePartyCode === true) setSetting("party_code", randomCode());
   if ("guestBaseUrl" in p)

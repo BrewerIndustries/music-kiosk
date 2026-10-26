@@ -69,7 +69,7 @@ export function NowPlaying({ state, notify, sdkDeviceId }: Props) {
       }
       try {
         if (action === "startPlaylist") {
-          await call("POST", "/api/player", { action, deviceId: sdkDeviceId });
+          await call("POST", "/api/player", { ...extra, action, deviceId: sdkDeviceId });
         } else {
           await call("POST", "/api/player", { action: "transfer", deviceId: sdkDeviceId, browser: true, play: true });
           if (action !== "play") await call("POST", "/api/player", { action, ...extra });
@@ -106,7 +106,9 @@ export function NowPlaying({ state, notify, sdkDeviceId }: Props) {
         setDevicesOpen(true);
         return;
       }
-      if (await act("startPlaylist", { deviceId: targetDevice })) notify(`Playing “${name}”`);
+      expect({ playing: false });
+      if (await act("startPlaylist", { deviceId: targetDevice, paused: true }))
+        notify(`“${name}” is loaded — press ▶ when ready`);
     } catch (e) {
       notify((e as Error).message);
     }

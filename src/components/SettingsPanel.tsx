@@ -53,6 +53,7 @@ export function SettingsPanel({
           Fade out lowers the music, pauses it, and puts the volume back for next time. Fade in starts it from
           silence (or raises it) to the Music volume.
         </p>
+        <TransitionSetting value={s?.songTransitionMs ?? 0} onSave={(ms) => save({ songTransitionMs: ms })} />
       </section>
 
       <section className="card space-y-4 p-4 text-sm">
@@ -182,6 +183,34 @@ export function SettingsPanel({
 }
 
 // Seconds slider for a sound card's fade-in / fade-out duration (saved as ms).
+// Fade between songs: 0 = off. Spotify can't overlap two songs from here, so this
+// fades the end of each song out and the next one in.
+function TransitionSetting({ value, onSave }: { value: number; onSave: (ms: number) => void }) {
+  const [sec, setSec] = useState(value / 1000);
+  const commit = () => onSave(Math.round(sec * 1000));
+  return (
+    <label className="block">
+      Fade between songs: <span className="font-semibold">{sec ? `${sec.toFixed(1)} s` : "off"}</span>
+      <input
+        type="range"
+        min={0}
+        max={12}
+        step={0.5}
+        value={sec}
+        onChange={(e) => setSec(Number(e.target.value))}
+        onPointerUp={commit}
+        onKeyUp={commit}
+        className="mt-2 w-full accent-[var(--accent)]"
+      />
+      <span className="text-xs text-muted">
+        Fades the last seconds of each song out and the next one in. A true overlapping crossfade is only possible
+        in the Spotify app&apos;s own settings (Playback ▸ Crossfade) when it is the player, e.g. on the iPad — if you
+        use that, leave this off.
+      </span>
+    </label>
+  );
+}
+
 function FadeSetting({ label, value, onSave }: { label: string; value: number; onSave: (ms: number) => void }) {
   const [sec, setSec] = useState(value / 1000);
   const commit = () => onSave(Math.round(sec * 1000));

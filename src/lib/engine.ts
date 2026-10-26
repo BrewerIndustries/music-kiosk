@@ -7,6 +7,7 @@ import { logError, recentErrors } from "./log";
 import { getSettings, updateSettings } from "./settings";
 import { getItem, head, moveToFront, setStatus, upNext, type QueueItem } from "./queue";
 import { getSetting, setSetting } from "./db";
+import { notePlaying, playHistory } from "./history";
 
 const CLIP_TIMEOUT_MS = 5 * 60_000; // give up on a queued clip the browser never finished
 const HOST_STALE_MS = 10_000; // a kiosk tab that hasn't polled in this long can't play clips
@@ -45,6 +46,10 @@ type EngineState = {
   fadeToken: number;
   fading: boolean;
   fadingSince: number;
+  // Song transition (fade the end of a song out, the next one in). transitionFor
+  // is the song whose ending we've already handled.
+  transitioning: boolean;
+  transitionFor: string | null;
 };
 
 const g = globalThis as unknown as { _kioskEngine?: EngineState; _kioskTick?: () => Promise<void> };
@@ -69,6 +74,8 @@ function freshState(): EngineState {
     fadeToken: 0,
     fading: false,
     fadingSince: 0,
+    transitioning: false,
+    transitionFor: null,
   };
 }
 
@@ -99,6 +106,7 @@ export function ensureEngine() {
 
 const HOLD_DUCK = "hold_duck";
 const HOLD_PAUSED = "hold_paused";
+const HOLD_TRANSITION = "hold_transition"; // music volume lowered for a song transition
 
 function recoverAfterRestart() {
   const s = state();
@@ -109,7 +117,7 @@ function recoverAfterRestart() {
   // A queued clip that was mid-play: it's gone; let the music carry on.
   for (const c of handed.filter((i) => i.kind === "clip")) setStatus(c.id, "played");
   // Music left lowered or paused for a clip: bring it back once we can talk to Spotify.
-  if (getSetting(HOLD_DUCK) || getSetting(HOLD_PAUSED) || handed.some((i) => i.kind === "clip"))
+  if (getSetting(HOLD_DUCK) || getSetting(HOLD_PAUSED) || getSetting(HOLD_TRANSITION) || handed.some((i) => i.kind === "clip"))
     setTimeout(() => releaseHolds().catch((e) => logError("engine", e, "restoring music after restart")), 1500);
 }
 
@@ -118,7 +126,7 @@ function recoverAfterRestart() {
 export async function releaseHolds() {
   const s = state();
   const wasPaused = Boolean(s.pausedForInstant || getSetting(HOLD_PAUSED));
-  const wasDucked = Boolean(s.duck || getSetting(HOLD_DUCK));
+  const wasDucked = Boolean(s.duck || getSetting(HOLD_DUCK) || getSetting(HOLD_TRANSITION));
   s.pausedForInstant = null;
   setSetting(HOLD_PAUSED, null);
   if (wasDucked) await restoreVolume();
@@ -225,6 +233,42 @@ export async function resumeOn(deviceId?: string) {
   return true;
 }
 
+// Start the backdrop playlist from the top, looping. `paused` loads it without
+// playing: Spotify can only load by playing, so mute, start, pause at 0:00, and
+// put the volume back.
+export async function startPlaylist(uri: string, deviceId: string | undefined, paused: boolean) {
+  const dev = { device_id: deviceId };
+  if (paused) await api("PUT", "/me/player/volume", undefined, { volume_percent: "0", ...dev }).catch(() => {});
+  try {
+    await api("PUT", "/me/player/play", { context_uri: uri }, dev);
+    // Loop the playlist so the backdrop never runs dry.
+    await api("PUT", "/me/player/repeat", undefined, { state: "context", ...dev }).catch(() => {});
+    if (paused) {
+      // A just-started player can refuse a pause for a moment; retry briefly.
+      for (let i = 0; ; i++) {
+        try {
+          await api("PUT", "/me/player/pause", undefined, dev);
+          break;
+        } catch (e) {
+          if (i >= 3) throw e;
+          await new Promise((r) => setTimeout(r, 400));
+        }
+      }
+      await api("PUT", "/me/player/seek", undefined, { position_ms: "0", ...dev }).catch(() => {});
+      markStopped();
+    }
+  } finally {
+    if (paused) {
+      state().volumeSetAt = Date.now();
+      await api("PUT", "/me/player/volume", undefined, {
+        volume_percent: String(Math.round(musicVolume())),
+        ...dev,
+      }).catch((e) => logError("engine", e, "restoring volume after loading playlist"));
+    }
+    poke();
+  }
+}
+
 // Run a tick now (after a user action) instead of waiting for the next poll, then
 // keep re-reading Spotify quickly for a few seconds: it takes a beat to report a
 // play/pause/skip, and the UI should catch it the moment it does.
@@ -259,6 +303,7 @@ async function tick() {
       // Spotify reports the song as paused on the dead device, which must not read as
       // "someone stopped the music". Deliberate stops go through markStopped().
       if (s.playback?.item && s.playback.is_playing) saveResumePoint(s.playback);
+      if (s.playback?.item) notePlaying(summarize(s.playback.item), s.playback.progress_ms ?? 0);
 
       const pb = s.playback;
       const h = head();
@@ -292,6 +337,7 @@ async function tick() {
       if (s.memory.clip && Date.now() - s.memory.clip.startedAt > CLIP_TIMEOUT_MS) await finishClip(s.memory.clip.id);
 
       await volumeHousekeeping();
+      delay = maybeTransition(delay);
 
       const uri = pb?.item?.uri ?? null;
       if (s.upcomingStale || uri !== s.upcomingForUri || Date.now() - s.upcomingAt > UPCOMING_REFRESH_MS)
@@ -509,7 +555,7 @@ async function volumeHousekeeping() {
     await restoreVolume();
     return;
   }
-  if (!s.duck && !s.fading && Date.now() - s.volumeSetAt > VOLUME_SYNC_QUIET_MS && dev.volume_percent !== musicVolume())
+  if (!s.duck && !isFading() && !s.transitioning && Date.now() - s.volumeSetAt > VOLUME_SYNC_QUIET_MS && dev.volume_percent !== musicVolume())
     updateSettings({ musicVolume: dev.volume_percent });
 }
 
@@ -525,6 +571,7 @@ export async function duck(): Promise<"volume" | "unsupported"> {
   const dev = s.playback?.device;
   if (!dev?.supports_volume) return "unsupported";
   const base = musicVolume();
+  s.fadeToken++; // a clip wins over a fade or song transition in progress
   // Record the duck before the call, so a failure after Spotify acted still restores.
   s.duck = { holders: 1, since: Date.now() };
   setSetting(HOLD_DUCK, "1");
@@ -550,7 +597,9 @@ export async function unduck() {
 export async function restoreVolume() {
   const s = state();
   s.duck = null;
+  s.fadeToken++;
   setSetting(HOLD_DUCK, null);
+  setSetting(HOLD_TRANSITION, null);
   const base = musicVolume();
   try {
     await applyVolume(base);
@@ -565,16 +614,87 @@ export async function restoreVolume() {
 
 // Step Spotify's volume from → to over ms. Returns false if another fade (or a
 // manual volume change) took over.
+// Paced by the clock, not by step count: each volume call takes a while, so
+// counting steps would stretch a 3 s fade well past 3 s.
 async function ramp(from: number, to: number, ms: number): Promise<boolean> {
   const s = state();
   const token = ++s.fadeToken;
-  const steps = Math.max(1, Math.round(ms / FADE_STEP_MS));
-  for (let i = 1; i <= steps; i++) {
+  const start = Date.now();
+  let last = NaN;
+  for (;;) {
     if (s.fadeToken !== token) return false;
-    await applyVolume(from + ((to - from) * i) / steps);
-    if (i < steps) await new Promise((r) => setTimeout(r, ms / steps));
+    const stepAt = Date.now();
+    const t = Math.min(1, (stepAt - start) / Math.max(ms, 1));
+    const v = Math.round(from + (to - from) * t);
+    if (v !== last) await applyVolume(v);
+    last = v;
+    if (t >= 1) break;
+    await new Promise((r) => setTimeout(r, Math.max(0, FADE_STEP_MS - (Date.now() - stepAt))));
   }
   return s.fadeToken === token;
+}
+
+// A fade can't legitimately run this long; treat an older flag as stale (e.g. a
+// fade whose Spotify call hung before calls had timeouts).
+function isFading() {
+  const s = state();
+  return s.fading && Date.now() - (s.fadingSince ?? 0) < 60_000;
+}
+
+// ---- Song transitions (Settings ▸ Music ▸ "Fade between songs") -------------
+// Spotify's API has no crossfade and plays one song at a time, so the kiosk fades
+// the last few seconds of a song out and the next song in. Skipped while a clip
+// holds the music, during a manual fade, before a queued clip, or on players
+// without volume control. Returns the tick delay, shortened to wake on time.
+function maybeTransition(delay: number): number {
+  const s = state();
+  const ms = getSettings().songTransitionMs;
+  const pb = s.playback;
+  if (!ms || !pb?.item || !pb.is_playing || !pb.device?.supports_volume) return delay;
+  if (s.duck || isFading() || s.transitioning || s.pausedForInstant || s.memory.clip) return delay;
+  if (head()?.kind === "clip") return delay; // the clip itself will pause the music
+  const uri = pb.item.uri;
+  if (s.transitionFor === uri) return delay;
+  const remaining = pb.item.duration_ms - (pb.progress_ms ?? 0);
+  if (remaining > ms + 250) return Math.min(delay, Math.max(150, remaining - ms - 150));
+  if (remaining < 600) return delay; // too late to fade this one
+  s.transitionFor = uri;
+  void runTransition(uri, remaining, ms);
+  return delay;
+}
+
+async function runTransition(uri: string, remaining: number, ms: number) {
+  const s = state();
+  const base = musicVolume();
+  s.transitioning = true;
+  setSetting(HOLD_TRANSITION, "1");
+  try {
+    if (!(await ramp(base, 0, Math.max(300, remaining - 300)))) return; // someone else took the volume
+    const token = s.fadeToken;
+    // Wait for the next song to start (up to 6 s).
+    let next = false;
+    for (const until = Date.now() + 6000; Date.now() < until; ) {
+      await new Promise((r) => setTimeout(r, 250));
+      const pb = await getPlayback().catch(() => null);
+      if (pb?.item && pb.item.uri !== uri) {
+        next = true;
+        break;
+      }
+      if (pb && !pb.is_playing && pb.item?.uri === uri && (pb.progress_ms ?? 0) < pb.item.duration_ms - 2000) break; // paused
+    }
+    if (s.fadeToken !== token) return;
+    if (next) await ramp(0, base, ms);
+    else await applyVolume(base);
+  } catch (e) {
+    logError("engine", e, "song transition");
+  } finally {
+    s.transitioning = false;
+    // Whatever happened, never leave the music quiet (unless a clip owns it now).
+    if (!s.duck && !isFading() && getSetting(HOLD_TRANSITION)) {
+      await applyVolume(musicVolume()).catch((e) => logError("engine", e, "restoring volume after transition"));
+    }
+    setSetting(HOLD_TRANSITION, null);
+  }
 }
 
 // Fade the music out (then pause, and put the volume back for next time) or in
@@ -642,11 +762,13 @@ export function snapshot() {
     nowPlayingItem: s.memory.nowPlayingId ? getItem(s.memory.nowPlayingId) : null,
     ducked: Boolean(s.duck),
     // Belt and braces: never show a fade that has outlived any real fade.
-    fading: s.fading && Date.now() - (s.fadingSince ?? 0) < 60_000,
+    fading: isFading(),
+    transitioning: s.transitioning,
     holdActive: holdActive(),
     resumeOffer: resumeOffer(),
     musicVolume: getSettings().musicVolume ?? pb?.device?.volume_percent ?? null,
     upcoming: s.upcoming,
+    history: playHistory().slice(0, 30),
     errors: recentErrors().slice(0, 15),
   };
 }

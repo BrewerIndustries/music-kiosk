@@ -27,6 +27,7 @@ export type KioskState = {
   resumeOffer?: { pref: string; uri: string; deviceId: string | null; deviceName: string | null } | null;
   musicVolume?: number | null;
   upcoming?: TrackSummary[];
+  history?: (TrackSummary & { playedAt: string })[];
   errors?: LoggedError[];
   upNext?: QueueItem[];
   pending?: QueueItem[];
