@@ -2,11 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { codeOk, validGuestId } from "@/lib/guest";
 import { guestRequests, upNext, type QueueItem } from "@/lib/queue";
 import { snapshot } from "@/lib/engine";
+import { playHistory } from "@/lib/history";
 
 export const dynamic = "force-dynamic";
 
-// GET /api/guest/queue?code=&guest= — what guests see: now playing, the songs in
-// Up Next (with their place), what the playlist plays after that, and this
+// GET /api/guest/queue?code=&guest= — what guests see: now playing, what played
+// before, the songs in Up Next (with their place), what the playlist plays after that, and this
 // phone's own requests with where each one stands. Songs only — sound clips stay
 // a surprise.
 export function GET(req: NextRequest) {
@@ -32,6 +33,9 @@ export function GET(req: NextRequest) {
       requestedBy: i.requestedBy,
       mine: Boolean(guest && i.guestId === guest),
     })),
+    previouslyPlayed: playHistory()
+      .slice(0, 15)
+      .map((t) => ({ title: t.title, subtitle: t.subtitle, art: t.art })),
     thenPlaylist: (snap.upcoming ?? []).slice(0, 8).map((t) => ({ title: t.title, subtitle: t.subtitle, art: t.art })),
     mine: guest
       ? guestRequests(guest).map((i) => ({

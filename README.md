@@ -75,7 +75,7 @@ It's a responsive web app: every feature works on a **laptop, iPad, or phone**. 
   player. Skipped while a clip holds the music, before a queued clip, or during a
   manual fade; a `hold_transition` flag restores the volume after a crash.
 - **Guest page** shows now playing, every song in Up Next with its place (clips stay
-  a surprise), the next playlist songs, and *Your requests* with live status
+  a surprise), the next playlist songs, Previously played (3 rows, scrolls), and *Your requests* with live status
   (waiting / #N in line / up next / playing / played). Each phone keeps a random
   `guest.id` in localStorage, stored on its requests (`queue.guest_id`);
   `GET /api/guest/queue?code=&guest=`.

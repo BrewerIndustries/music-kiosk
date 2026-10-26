@@ -17,6 +17,7 @@ type GuestQueue = {
   nowPlaying: (Art & { isPlaying: boolean }) | null;
   queue: (Art & { place: number; requestedBy: string | null; mine: boolean })[];
   thenPlaylist: Art[];
+  previouslyPlayed: Art[];
   mine: (Art & { id: string; state: "pending" | "queued" | "playing" | "played" | "declined"; place: number | null })[];
 };
 
@@ -125,6 +126,18 @@ export function GuestRequest({ code }: { code: string }) {
   return (
     <div className="mx-auto min-h-dvh max-w-lg px-4 py-6">
       <h1 className="festive text-3xl">🎄 Request a song 🎁</h1>
+      {gq && gq.previouslyPlayed.length > 0 && (
+        <section className="mt-4">
+          <h2 className="text-xs font-semibold uppercase tracking-wider text-muted">Previously played</h2>
+          {/* Three rows tall; scroll for more. */}
+          <ol className="mt-2 max-h-[8.25rem] space-y-1 overflow-y-auto overscroll-contain rounded-lg border border-line/60 opacity-80">
+            {gq.previouslyPlayed.map((t, i) => (
+              <SongLine key={`${i}-${t.title}`} song={t} />
+            ))}
+          </ol>
+        </section>
+      )}
+
       {(gq?.nowPlaying ?? info.nowPlaying) && (
         <div className="card mt-4 flex items-center gap-3 p-3">
           <div className="art h-12 w-12 shrink-0">
