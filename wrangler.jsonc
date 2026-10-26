@@ -21,7 +21,14 @@
   "observability": { "enabled": true },
   // The API routes keep their Next.js imports; at bundle time they get the shim.
   "alias": { "next/server": "./src/server/next-shim.ts" },
-  "assets": { "directory": "./out", "binding": "ASSETS", "not_found_handling": "404-page" },
+  // run_worker_first: browser navigations to /api/* (Spotify login, OAuth callback)
+  // would otherwise get the static 404 page instead of reaching the Worker.
+  "assets": {
+    "directory": "./out",
+    "binding": "ASSETS",
+    "not_found_handling": "404-page",
+    "run_worker_first": ["/api/*"]
+  },
   "durable_objects": { "bindings": [{ "name": "KIOSK", "class_name": "KioskObject" }] },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["KioskObject"] }],
   "routes": [{ "pattern": "musickiosk.dabrewer.dev", "custom_domain": true }],
