@@ -17,6 +17,8 @@ const DUCK_WATCHDOG_MS = 3 * 60_000; // restore the volume if a duck is somehow 
 const VOLUME_SYNC_QUIET_MS = 6000;
 const RESUME_MAX_AGE_MS = 6 * 60 * 60_000; // offer to resume playback lost up to 6 h ago
 const FADE_STEP_MS = 200;
+const IDLE_POLL_MS = 60_000; // engine poll with nothing playing and no kiosk page open
+const STALE_SNAPSHOT_MS = 2500; // a polling page wakes the engine if its data is older
 
 type EngineState = {
   started: boolean;
@@ -42,6 +44,8 @@ type EngineState = {
   upcomingForUri: string | null;
   upcomingStale: boolean;
   burstUntil: number;
+  ticking: boolean;
+  tickAgain: boolean;
   // A music fade in progress (bumping the token cancels it).
   fadeToken: number;
   fading: boolean;
@@ -71,6 +75,8 @@ function freshState(): EngineState {
     upcomingForUri: null,
     upcomingStale: true,
     burstUntil: 0,
+    ticking: false,
+    tickAgain: false,
     fadeToken: 0,
     fading: false,
     fadingSince: 0,
@@ -324,14 +330,57 @@ export function poke() {
   schedule(50);
 }
 
+// On Cloudflare the loop runs on Durable Object alarms (they wake the object even
+// when no kiosk page is open); elsewhere (tests) on setTimeout. Either way only
+// one wake-up is pending at a time — a new schedule() replaces it.
+let alarmScheduler: ((at: number) => void) | null = null;
+export function attachAlarms(set: (at: number) => void) {
+  alarmScheduler = set;
+}
+
 function schedule(ms: number) {
   const s = state();
+  if (alarmScheduler) {
+    alarmScheduler(Date.now() + ms);
+    return;
+  }
   if (s.timer) clearTimeout(s.timer);
   // Call through globalThis so a hot-reloaded module's tick takes over the loop.
   s.timer = setTimeout(() => g._kioskTick?.(), ms);
 }
 
+// The alarm handler.
+export function runTick() {
+  return g._kioskTick?.() ?? Promise.resolve();
+}
+
+// A kiosk page is polling: make sure what it sees is fresh even if the loop has
+// backed off (nothing playing, nobody watching).
+export function freshen() {
+  const s = state();
+  if (!s.ticking && Date.now() - s.playbackAt > STALE_SNAPSHOT_MS) schedule(0);
+}
+
+// Never two ticks at once: a wake-up that lands mid-tick runs right after it.
 async function tick() {
+  const s = state();
+  if (s.ticking) {
+    s.tickAgain = true;
+    return;
+  }
+  s.ticking = true;
+  try {
+    await tickBody();
+  } finally {
+    s.ticking = false;
+    if (s.tickAgain) {
+      s.tickAgain = false;
+      schedule(0);
+    }
+  }
+}
+
+async function tickBody() {
   const s = state();
   let delay = 5000;
   try {
@@ -394,6 +443,8 @@ async function tick() {
     delay = e instanceof SpotifyError && e.status === 429 ? 10_000 : 3000;
   }
   if (Date.now() < (s.burstUntil ?? 0)) delay = Math.min(delay, BURST_POLL_MS);
+  // Nothing playing and no kiosk page open: check in once a minute instead.
+  else if (!s.playback?.is_playing && !s.memory.clip && !hostAlive()) delay = Math.max(delay, IDLE_POLL_MS);
   schedule(delay);
 }
 

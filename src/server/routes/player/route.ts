@@ -49,6 +49,12 @@ export function POST(req: NextRequest) {
       case "previous":
         await api("POST", "/me/player/previous");
         break;
+      case "seek": // the progress bar
+        await api("PUT", "/me/player/seek", undefined, {
+          position_ms: String(Math.max(0, Math.round(Number(b.positionMs) || 0))),
+        });
+        poke();
+        break;
       case "volume": // the music volume slider; also what ducking restores to
         await setMusicVolume(Number(b.percent));
         break;

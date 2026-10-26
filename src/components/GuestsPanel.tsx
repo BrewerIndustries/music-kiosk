@@ -57,6 +57,32 @@ export function GuestsPanel({ state, notify }: { state: KioskState; notify: Noti
       )}
 
       <section className="card space-y-3 p-4 text-sm">
+        <h2 className="section-title">Request rules</h2>
+        <label className="flex items-center justify-between gap-4">
+          <span>
+            Guests can request songs
+            <span className="block text-xs text-muted">Off: the QR page says requests are closed.</span>
+          </span>
+          <input
+            type="checkbox"
+            className="h-5 w-5 accent-[var(--accent)]"
+            checked={state.settings?.guestRequestsOpen ?? true}
+            onChange={(e) => save({ guestRequestsOpen: e.target.checked })}
+          />
+        </label>
+        <GuestLimit state={state} save={save} />
+        <label className="flex items-center justify-between gap-4">
+          <span>
+            Block duplicates
+            <span className="block text-xs text-muted">Refuse a song that&apos;s already waiting or in Up Next.</span>
+          </span>
+          <input
+            type="checkbox"
+            className="h-5 w-5 accent-[var(--accent)]"
+            checked={state.settings?.guestBlockDuplicates ?? true}
+            onChange={(e) => save({ guestBlockDuplicates: e.target.checked })}
+          />
+        </label>
         <label className="flex items-center justify-between gap-4">
           <span>
             Approve requests first
@@ -69,19 +95,113 @@ export function GuestsPanel({ state, notify }: { state: KioskState; notify: Noti
             onChange={(e) => save({ requireApproval: e.target.checked })}
           />
         </label>
-        <div className="flex items-center justify-between gap-4">
-          <span>
-            New party code
-            <span className="block text-xs text-muted">Old QR codes and links stop working.</span>
-          </span>
-          <button className="btn" onClick={() => confirm("Make a new party code?") && save({ rotatePartyCode: true })}>
+        <PartyCode state={state} save={save} />
+      </section>
+    </div>
+  );
+}
+
+// The code in every guest link / QR. Rotate for a random new one (old links stop
+// working), set a specific one (e.g. what's on printed QR cards), or put back the
+// one before.
+function PartyCode({ state, save }: { state: KioskState; save: (p: Record<string, unknown>) => void }) {
+  const code = state.settings?.partyCode ?? "";
+  const prev = state.settings?.previousPartyCode ?? null;
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState("");
+  const valid = /^[A-Za-z0-9]{3,12}$/.test(draft.trim());
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between gap-4">
+        <span>
+          Party code <span className="font-mono font-semibold tracking-widest text-accent">{code}</span>
+          <span className="block text-xs text-muted">Changing it makes old QR codes and links stop working.</span>
+        </span>
+        <div className="flex shrink-0 gap-2">
+          <button
+            className="btn"
+            onClick={() => {
+              setDraft(code);
+              setEditing(!editing);
+            }}
+          >
+            {editing ? "Cancel" : "Set…"}
+          </button>
+          <button className="btn" onClick={() => confirm("Make a new random party code? Printed QR codes will stop working.") && save({ rotatePartyCode: true })}>
             Rotate
           </button>
         </div>
-        <p className="text-xs text-muted">
-          Guests get 3 requests per 10 minutes, and duplicates are blocked.
-        </p>
-      </section>
+      </div>
+      {editing && (
+        <form
+          className="flex gap-2"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (!valid) return;
+            save({ partyCode: draft.trim().toUpperCase() });
+            setEditing(false);
+          }}
+        >
+          <input
+            className="input font-mono uppercase tracking-widest"
+            value={draft}
+            maxLength={12}
+            autoCapitalize="characters"
+            autoCorrect="off"
+            spellCheck={false}
+            placeholder="e.g. the code on your printed cards"
+            onChange={(e) => setDraft(e.target.value)}
+          />
+          <button className="btn btn-primary" disabled={!valid}>Save</button>
+        </form>
+      )}
+      {editing && !valid && draft && <p className="text-xs text-red-400">3–12 letters or numbers.</p>}
+      {prev && prev !== code && (
+        <button className="text-xs text-accent underline" onClick={() => save({ partyCode: prev })}>
+          Put back the previous code ({prev})
+        </button>
+      )}
+    </div>
+  );
+}
+
+// Songs per phone per window (0 = unlimited). Saved when a field is left.
+function GuestLimit({ state, save }: { state: KioskState; save: (p: Record<string, unknown>) => void }) {
+  const [limit, setLimit] = useState(String(state.settings?.guestLimit ?? 3));
+  const [minutes, setMinutes] = useState(String(state.settings?.guestWindowMin ?? 10));
+  const commit = () => {
+    const l = Math.max(0, Math.min(50, Math.round(Number(limit) || 0)));
+    const m = Math.max(1, Math.min(240, Math.round(Number(minutes) || 10)));
+    setLimit(String(l));
+    setMinutes(String(m));
+    save({ guestLimit: l, guestWindowMin: m });
+  };
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-2">
+      <span>
+        Requests per guest
+        <span className="block text-xs text-muted">Per phone. 0 = no limit.</span>
+      </span>
+      <span className="flex items-center gap-2">
+        <input
+          className="input w-16 px-2 py-1 text-center"
+          inputMode="numeric"
+          aria-label="Requests allowed"
+          value={limit}
+          onChange={(e) => setLimit(e.target.value)}
+          onBlur={commit}
+        />
+        every
+        <input
+          className="input w-16 px-2 py-1 text-center"
+          inputMode="numeric"
+          aria-label="Minutes"
+          value={minutes}
+          onChange={(e) => setMinutes(e.target.value)}
+          onBlur={commit}
+        />
+        min
+      </span>
     </div>
   );
 }

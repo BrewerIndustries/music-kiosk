@@ -9,15 +9,38 @@ from their phones.
 It's a responsive web app: every feature works on a **laptop, iPad, or phone**. See
 [DESIGN.md](DESIGN.md) for the why.
 
-- **Stack:** Next.js 16 + React 19 + Tailwind 4, SQLite via `better-sqlite3`.
-- **Status:** v1 built and running locally on the Mac; awaiting Spotify app
-  credentials for the first real test. Not yet deployed to the jarvis server.
+- **Stack:** Next.js 16 + React 19 + Tailwind 4 (static export) on **Cloudflare
+  Workers**: one Worker serves the pages and `/api/*`; all state and the playback
+  engine live in a single **Durable Object** with SQLite (`KioskObject`).
+- **Status:** v1 tested on the Mac (local server); Cloudflare port on branch
+  `cloudflare`, smoke-tested under `wrangler dev`. Hosts:
+  musickiosk-dev.dabrewer.dev (dev), musickiosk.dabrewer.dev (prod).
+
+## Cloudflare architecture
+
+- [src/server/worker.ts](src/server/worker.ts): `/api/*` goes to the one
+  `KioskObject` (`idFromName("kiosk")`), everything else to the static assets in
+  `out/`. One object = one engine = no races, and it keeps running with no page open.
+- The route files are the original Next.js route handlers, moved to
+  `src/server/routes/` and dispatched by [src/server/router.ts](src/server/router.ts);
+  `next/server` is aliased to a small shim ([src/server/next-shim.ts](src/server/next-shim.ts)).
+- [src/lib/db.ts](src/lib/db.ts) wraps the Durable Object's `ctx.storage.sql` in the
+  same `prepare().get/all/run` API the code used with better-sqlite3.
+- The engine loop is a **Durable Object alarm** (`attachAlarms` → `setAlarm`); with
+  nothing playing, no clip and no kiosk page open it backs off to one poll a minute,
+  and a page's `/api/state` wakes it at once if its snapshot is stale.
+- Soundboard calls go over a **service binding** (`SOUNDBOARD`) with a bearer token
+  (`SOUNDBOARD_TOKEN` = the Soundboard's `JARVIS_TOKEN`).
+- Emails (invite / reset) use the `send_email` binding `EMAIL` from
+  `noreply@dabrewer.dev`. Needs Workers Paid + `wrangler email sending enable
+  dabrewer.dev`; until then sending fails soft and the invite link is shown to the
+  admin to copy.
 
 ## How it works
 
 - **The kiosk owns the queue.** Spotify's queue is append-only (no insert-at-front,
-  reorder, or remove) and can't play local files, so Up Next lives in SQLite. A server
-  loop ([src/lib/engine.ts](src/lib/engine.ts)) polls `/me/player` and hands Spotify
+  reorder, or remove) and can't play local files, so Up Next lives in SQLite. The
+  engine ([src/lib/engine.ts](src/lib/engine.ts), run by the Durable Object alarm) polls `/me/player` and hands Spotify
   **one** track ~8 s before the current one ends; Spotify plays it gaplessly and then
   falls back to the playlist on its own. Decision logic is pure and unit-tested
   ([src/lib/engine-core.ts](src/lib/engine-core.ts)).
@@ -88,42 +111,76 @@ It's a responsive web app: every feature works on a **laptop, iPad, or phone**. 
 - **Errors** from routes and the engine go to the server log and *Settings ▸ Recent errors*.
 - **Soundboard** stays the source of record for clips. The kiosk reads its open
   `/api/boards` and proxies `/api/audio/<key>` (`SOUNDBOARD_URL`).
-- **Guests:** `/request?code=XXXX` (QR on the Guests tab). Server-side search, 3
-  requests / 10 min per IP, duplicates blocked, optional approval. Rotate the party
-  code to kill old QR codes. Today guests must be on the same network as the kiosk;
-  a public Cloudflare Worker front door is the planned next step (DESIGN.md).
-- **Admin:** the kiosk is always admin. Set `KIOSK_PIN` to require a PIN once per
-  device (cookie); guests only reach `/api/guest/*`.
+- **Guests:** `/request?code=XXXX` (QR on the Guests tab), reachable from any network.
+  Guests must type their name before a request is sent (shown as *requested by*).
+  Server-side search.
+- **Request rules** (*Guests ▸ Request rules*): requests on/off, N requests every M
+  minutes per phone (default 3 / 10; counted by the phone's `guest.id`, with a
+  150-per-10-min ceiling per network since venue Wi-Fi shares one IP), block songs
+  already queued, approve requests first.
+- **Party code:** *Rotate* kills old QR codes; *Set…* picks a specific code (3–12
+  letters/numbers); *Put back the previous code* restores the one before the last
+  change — for when printed QR codes stop working after an accidental rotate.
+- **Progress bar** is draggable (and ←/→ steps 10 s) to seek in the song.
+- **Lower the music** switch (Sounds tab, *Play over* mode): off plays clips over the
+  music at full volume with no duck (remembered per device).
+- **Accounts** ([src/lib/accounts.ts](src/lib/accounts.ts)): invite-only email +
+  password. Admins invite from *Settings ▸ People* (emailed link, 7 days; the link is
+  also shown to copy), set admin/member, disable, remove, resend; there is always
+  at least one admin. *Forgot password?* emails a 1-hour reset link; a reset signs out
+  other devices. PBKDF2-SHA256 (100k), session cookie `mk_session` (HttpOnly, 90-day
+  rolling, only an HMAC of the token is stored), rate-limited sign-in / forgot.
+  First run: `BOOTSTRAP_ADMIN_EMAIL` becomes the admin with no password — use
+  *Forgot password?* to set it. Guests never sign in; they only reach `/api/guest/*`.
 
 ## Local development (Mac)
 
 ```bash
 npm install
-cp .env.example .env.local    # fill in SPOTIFY_CLIENT_ID / SECRET
-npm run dev                   # http://127.0.0.1:3000 (bound to 0.0.0.0 so phones can reach the guest page)
-npm test                      # engine unit tests
-npm run build
+# .dev.vars (git-ignored): SPOTIFY_CLIENT_ID, SPOTIFY_CLIENT_SECRET, SESSION_SECRET,
+#   SOUNDBOARD_TOKEN, SPOTIFY_REDIRECT_URI=http://127.0.0.1:8787/api/spotify/callback
+npm run dev:api               # the Worker + Durable Object on :8787 (wrangler dev --local)
+npm run dev                   # Next dev UI on :3000, /api proxied to :8787
+npm test && npm run typecheck && npm run lint
 ```
 
-Spotify app setup (developer.spotify.com → Create app, Web API + Web Playback SDK):
-add the redirect URI `http://127.0.0.1:3000/api/spotify/callback` exactly (Spotify
-rejects `localhost`). Create the app with the same Spotify account that will play the
-music, or add the playing account under User Management (dev-mode apps only allow
-listed users). Premium is required.
+Or `npx next build` then open the Worker directly at http://127.0.0.1:8787 (it serves
+`out/`). Local emails aren't sent: wrangler writes them under `.wrangler/tmp/email/`.
 
-Open the kiosk at **127.0.0.1** (not localhost) so the OAuth cookie matches.
+Spotify app setup (developer.spotify.com → Create app, Web API + Web Playback SDK):
+register each redirect URI exactly (Spotify rejects `localhost`):
+`http://127.0.0.1:8787/api/spotify/callback`,
+`https://musickiosk-dev.dabrewer.dev/api/spotify/callback`,
+`https://musickiosk.dabrewer.dev/api/spotify/callback`. Create the app with the same
+Spotify account that will play the music, or add the playing account under User
+Management (dev-mode apps only allow listed users). Premium is required.
 
 **Dev-mode gotcha:** Spotify caps `/search` at `limit=10` for development-mode apps
 (`limit=11+` → 400 "Invalid limit"; no limit → 5). `searchTracks()` pages in 10s.
 
-## Environments (planned — jarvis server, `dan@100.102.159.57`)
+## Environments (Cloudflare Workers)
 
-| Env  | Branch | Port | URL (TBD) |
-| ---- | ------ | ---- | --------- |
-| DEV  | `dev`  | 4870 | music.dev.dabrewer.dev |
-| MAIN | `main` | 4860 | music.dabrewer.dev |
+| Env  | Branch | Worker           | URL                              | Soundboard binding |
+| ---- | ------ | ---------------- | -------------------------------- | ------------------ |
+| DEV  | `dev`  | `musickiosk-dev` | https://musickiosk-dev.dabrewer.dev | `soundboard-dev` |
+| MAIN | `main` | `musickiosk`     | https://musickiosk.dabrewer.dev  | `soundboard`       |
 
-Each env will need its own Spotify redirect URI registered.
+Deploy (wrangler's OAuth login; the shell's `CLOUDFLARE_API_TOKEN` is DNS-only):
+
+```bash
+env -u CLOUDFLARE_API_TOKEN npm run deploy:dev     # or: npm run deploy (prod)
+# once per env: wrangler secret put SPOTIFY_CLIENT_ID | SPOTIFY_CLIENT_SECRET |
+#   SESSION_SECRET | SOUNDBOARD_TOKEN   (add --env dev for dev)
+```
+
+**Moving the old local kiosk's settings over** (playlist, volumes, fades, rules,
+party code, history, resume point, and — unless `--no-spotify` — the Spotify login).
+Stop the old kiosk first if Spotify comes too, or both will drive playback:
+
+```bash
+KIOSK_EMAIL=… KIOSK_PASSWORD=… node scripts/import-local.mjs \
+  --db ../music-kiosk/data/kiosk.db --url https://musickiosk-dev.dabrewer.dev
+```
 
 ## Workflow ⚠️
 

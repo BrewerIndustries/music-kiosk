@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { clientIp, codeOk, GUEST_LIMIT, takeGuestSlot, validGuestId } from "@/lib/guest";
+import { clientIp, codeOk, takeGuestSlot, validGuestId } from "@/lib/guest";
 import { api, summarize, type SpTrack } from "@/lib/spotify";
 import { addItem, isQueued } from "@/lib/queue";
 import { getSettings } from "@/lib/settings";
@@ -15,15 +15,18 @@ export function POST(req: NextRequest) {
     if (!codeOk(b.code ?? null)) return NextResponse.json({ error: "This party link has expired." }, { status: 403 });
     const id = /^spotify:track:([A-Za-z0-9]{22})$/.exec(b.uri ?? "")?.[1];
     if (!id) return NextResponse.json({ error: "bad track" }, { status: 400 });
-    if (isQueued(b.uri!)) return NextResponse.json({ error: "That song is already in the queue!" }, { status: 409 });
-    if (!takeGuestSlot(clientIp(req)))
-      return NextResponse.json(
-        { error: `Easy, DJ — ${GUEST_LIMIT} requests per 10 minutes. Try again soon.` },
-        { status: 429 },
-      );
+    const name = (b.name ?? "").trim().slice(0, 40);
+    if (!name) return NextResponse.json({ error: "Please add your name so we know who requested it." }, { status: 400 });
+    const rules = getSettings();
+    if (!rules.guestRequestsOpen)
+      return NextResponse.json({ error: "Song requests are closed right now." }, { status: 403 });
+    if (rules.guestBlockDuplicates && isQueued(b.uri!))
+      return NextResponse.json({ error: "That song is already in the queue!" }, { status: 409 });
+    const limited = takeGuestSlot(clientIp(req), validGuestId(b.guestId));
+    if (limited) return NextResponse.json({ error: limited }, { status: 429 });
     // Look the track up ourselves rather than trusting the client's title/art.
     const t = summarize((await api<SpTrack>("GET", `/tracks/${id}`))!);
-    const { requireApproval } = getSettings();
+    const { requireApproval } = rules;
     addItem(
       {
         kind: "track",
@@ -32,7 +35,7 @@ export function POST(req: NextRequest) {
         subtitle: t.subtitle,
         art: t.art,
         durationMs: t.durationMs,
-        requestedBy: (b.name ?? "").trim() || "Guest",
+        requestedBy: name,
         source: "guest",
         guestId: validGuestId(b.guestId),
       },

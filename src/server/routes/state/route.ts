@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import { activeClip, ensureEngine, heartbeat, poke, snapshot } from "@/lib/engine";
+import { activeClip, ensureEngine, freshen, heartbeat, poke, snapshot } from "@/lib/engine";
 import { pendingRequests, recentlyPlayed, upNext } from "@/lib/queue";
 import { clientConfig, isConnected } from "@/lib/spotify";
 import { getSetting } from "@/lib/db";
 import { getSettings } from "@/lib/settings";
-import { isAdmin, pinRequired } from "@/lib/auth";
+import { currentUser } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
@@ -14,15 +14,16 @@ export const dynamic = "force-dynamic";
 // so re-read Spotify now.
 export function GET(req: NextRequest) {
   ensureEngine();
-  const admin = isAdmin(req);
-  if (!admin) return NextResponse.json({ locked: true, pinRequired: true });
+  const me = currentUser(req);
+  if (!me) return NextResponse.json({ locked: true });
   const client = req.nextUrl.searchParams.get("client");
   if (req.nextUrl.searchParams.get("poke") === "1") poke();
   const isAudioHost = heartbeat(client, req.nextUrl.searchParams.get("claim") === "1");
+  freshen();
   const user = getSetting("spotify_user");
   return NextResponse.json({
     locked: false,
-    pinRequired: pinRequired(),
+    me,
     spotify: { configured: clientConfig().configured, connected: isConnected(), user: user ? JSON.parse(user) : null },
     ...snapshot(),
     upNext: upNext(),

@@ -8,7 +8,7 @@ export type { QueueItem, KioskSettings, SpDevice, TrackSummary };
 
 export type KioskState = {
   locked: boolean;
-  pinRequired: boolean;
+  me?: { id: string; email: string; name: string; role: "admin" | "member" } | null;
   spotify?: { configured: boolean; connected: boolean; user: { name?: string; product?: string } | null };
   error?: string | null;
   playback?: {

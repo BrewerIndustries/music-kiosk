@@ -14,6 +14,9 @@ export function GET(req: NextRequest) {
     ok: true,
     ready: isConnected(),
     requireApproval: getSettings().requireApproval,
+    open: getSettings().guestRequestsOpen,
+    limit: getSettings().guestLimit,
+    windowMin: getSettings().guestWindowMin,
     nowPlaying: track ? { title: track.title, subtitle: track.subtitle, art: track.art } : null,
   });
 }

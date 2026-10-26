@@ -56,6 +56,14 @@ export function SoundsPanel({ state, notify }: { state: KioskState; notify: Noti
   const [boardId, setBoardId] = useState<string | null>(null);
   const [pageId, setPageId] = useState<string | null>(null);
   const [mode, setModeState] = useState<Mode>("pause");
+  // Play over: lower the music under the clip (on), or leave it alone (off).
+  const [duckOn, setDuckOnState] = useState(true);
+  const setDuckOn = (on: boolean) => {
+    setDuckOnState(on);
+    try {
+      localStorage.setItem("kiosk.duckOn", on ? "1" : "0");
+    } catch {}
+  };
   // Re-render whenever any clip changes state (playing, paused, fading…).
   useSyncExternalStore(subscribeClips, clipsVersion, () => 0);
   const fadeInMs = state.settings?.fadeInMs ?? 2000;
@@ -64,6 +72,9 @@ export function SoundsPanel({ state, notify }: { state: KioskState; notify: Noti
 
   useEffect(() => {
     setModeState(loadMode());
+    try {
+      setDuckOnState(localStorage.getItem("kiosk.duckOn") !== "0");
+    } catch {}
     call<{ boards: SbBoard[]; manageUrl: string }>("GET", "/api/soundboard/boards")
       .then((r) => {
         setBoards(r.boards);
@@ -104,12 +115,12 @@ export function SoundsPanel({ state, notify }: { state: KioskState; notify: Noti
         .catch((e) => notify(e.message));
       return;
     }
-    const note = await startClip(s.id, s.key, mode);
+    const note = await startClip(s.id, s.key, liveMode);
     if (note) notify(note);
   };
 
   // The card buttons always play live; in Up Next mode they use Pause & play.
-  const liveMode: ClipMode = mode === "queue" ? "pause" : mode;
+  const liveMode: ClipMode = mode === "queue" ? "pause" : mode === "duck" && !duckOn ? "over" : mode;
   const showNote = (p: Promise<string | null> | void) => p?.then((n) => n && notify(n));
   const controls = (s: SbSound) => ({
     status: clipStatus(s.id),
@@ -143,7 +154,30 @@ export function SoundsPanel({ state, notify }: { state: KioskState; notify: Noti
           </button>
         ))}
       </div>
-      <p className="mt-2 text-xs text-muted">{MODES.find((m) => m.id === mode)?.hint}</p>
+      <div className="mt-2 flex items-center justify-between gap-3">
+        <p className="text-xs text-muted">
+          {mode === "duck" && !duckOn
+            ? "Plays the clip over the music at full volume."
+            : MODES.find((m) => m.id === mode)?.hint}
+        </p>
+        {mode === "duck" && (
+          <label className="flex shrink-0 cursor-pointer items-center gap-2 text-xs">
+            Lower the music
+            <button
+              type="button"
+              role="switch"
+              aria-checked={duckOn}
+              aria-label="Lower the music while a sound plays"
+              onClick={() => setDuckOn(!duckOn)}
+              className={`relative h-6 w-11 rounded-full transition-colors ${duckOn ? "bg-accent" : "bg-line"}`}
+            >
+              <span
+                className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-all ${duckOn ? "left-[22px]" : "left-0.5"}`}
+              />
+            </button>
+          </label>
+        )}
+      </div>
 
       {error && <p className="mt-4 text-sm text-red-400">Couldn’t reach Soundboard: {error}</p>}
       {boards === null && !error && <p className="mt-4 text-sm text-muted">Loading sounds…</p>}

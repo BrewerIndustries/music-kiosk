@@ -10,9 +10,10 @@
 //   pause — pause Spotify, resume the song where it stopped
 //   duck  — lower Spotify (volume API → iOS audio-session "transient" → fall back
 //           to pause), restore it afterwards
+//   over  — leave the music alone (Play over with "Lower the music" off)
 import { call } from "./client";
 
-export type ClipMode = "pause" | "duck";
+export type ClipMode = "pause" | "duck" | "over"; // over = play over the music untouched
 export type ClipStatus = "stopped" | "playing" | "paused" | "fading-in" | "fading-out";
 
 type AudioSessionNav = Navigator & { audioSession?: { type: string } };
@@ -99,6 +100,7 @@ export function setClipVolume(percent: number) {
 type Hold = { release: () => Promise<void>; note: string | null };
 
 async function acquireHold(mode: ClipMode): Promise<Hold> {
+  if (mode === "over") return { note: null, release: async () => {} };
   if (mode === "duck") {
     const { method } = await call<{ method: string }>("POST", "/api/player", { action: "duck" }).catch(() => ({
       method: "unsupported",

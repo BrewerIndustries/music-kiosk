@@ -17,7 +17,7 @@ const eslintConfig = [
       "@next/next/no-img-element": "off",
     },
   },
-  { ignores: [".next/**", "node_modules/**", "next-env.d.ts"] },
+  { ignores: [".next/**", "node_modules/**", "next-env.d.ts", "out/**", ".wrangler/**"] },
 ];
 
 export default eslintConfig;

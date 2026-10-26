@@ -1,5 +1,4 @@
 // Kiosk settings (stored in the settings table) with defaults.
-import { networkInterfaces } from "os";
 import { getSetting, setSetting } from "./db";
 
 export type KioskSettings = {
@@ -14,13 +13,24 @@ export type KioskSettings = {
   musicFadeOutMs: number; // music "fade out" duration
   songTransitionMs: number; // fade between songs (0 = off)
   requireApproval: boolean; // guest requests wait for admin approval
+  guestRequestsOpen: boolean; // guests can send songs at all
+  guestLimit: number; // songs per guest phone per window (0 = no limit)
+  guestWindowMin: number; // …this many minutes
+  guestBlockDuplicates: boolean; // refuse a song that's already waiting/queued
   partyCode: string; // in the guest link; rotate to lock old QR codes out
+  previousPartyCode: string | null; // the code before the last change, to put back printed QR codes
   guestBaseUrl: string | null; // override for the QR link (e.g. the public guest site)
 };
 
 function randomCode() {
   const letters = "ABCDEFGHJKLMNPQRSTUVWXYZ";
   return Array.from({ length: 4 }, () => letters[Math.floor(Math.random() * letters.length)]).join("");
+}
+
+// Party codes: 3–12 letters/digits, upper case (guest links are case-insensitive).
+export function cleanPartyCode(input: string): string | null {
+  const c = input.trim().toUpperCase();
+  return /^[A-Z0-9]{3,12}$/.test(c) ? c : null;
 }
 
 export function getSettings(): KioskSettings {
@@ -41,7 +51,12 @@ export function getSettings(): KioskSettings {
     musicFadeOutMs: Number(getSetting("music_fade_out_ms") ?? 5000),
     songTransitionMs: Number(getSetting("song_transition_ms") ?? 0),
     requireApproval: getSetting("require_approval") === "1",
+    guestRequestsOpen: getSetting("guest_open") !== "0",
+    guestLimit: Number(getSetting("guest_limit") ?? 3),
+    guestWindowMin: Number(getSetting("guest_window_min") ?? 10),
+    guestBlockDuplicates: getSetting("guest_block_dupes") !== "0",
     partyCode,
+    previousPartyCode: getSetting("party_code_prev"),
     guestBaseUrl: getSetting("guest_base_url"),
   };
 }
@@ -65,7 +80,19 @@ export function updateSettings(p: Record<string, unknown>) {
   if (typeof p.songTransitionMs === "number")
     setSetting("song_transition_ms", String(Math.max(0, Math.min(12_000, Math.round(p.songTransitionMs)))));
   if (typeof p.requireApproval === "boolean") setSetting("require_approval", p.requireApproval ? "1" : "0");
-  if (p.rotatePartyCode === true) setSetting("party_code", randomCode());
+  if (typeof p.guestRequestsOpen === "boolean") setSetting("guest_open", p.guestRequestsOpen ? "1" : "0");
+  if (typeof p.guestBlockDuplicates === "boolean") setSetting("guest_block_dupes", p.guestBlockDuplicates ? "1" : "0");
+  if (typeof p.guestLimit === "number") setSetting("guest_limit", String(Math.max(0, Math.min(50, Math.round(p.guestLimit)))));
+  if (typeof p.guestWindowMin === "number")
+    setSetting("guest_window_min", String(Math.max(1, Math.min(240, Math.round(p.guestWindowMin)))));
+  // Changing the code (new random one, or a specific one — e.g. the code on printed
+  // QR cards) keeps the old one, so a mistaken rotate can be undone.
+  const nextCode =
+    p.rotatePartyCode === true ? randomCode() : typeof p.partyCode === "string" ? cleanPartyCode(p.partyCode) : null;
+  if (nextCode && nextCode !== getSetting("party_code")) {
+    setSetting("party_code_prev", getSetting("party_code"));
+    setSetting("party_code", nextCode);
+  }
   if ("guestBaseUrl" in p)
     setSetting("guest_base_url", typeof p.guestBaseUrl === "string" && p.guestBaseUrl.trim() ? p.guestBaseUrl.trim().replace(/\/$/, "") : null);
 }
@@ -75,12 +102,5 @@ export function updateSettings(p: Record<string, unknown>) {
 export function guestBase(reqOrigin: string): string {
   const s = getSettings();
   if (s.guestBaseUrl) return s.guestBaseUrl;
-  const u = new URL(reqOrigin);
-  if (["127.0.0.1", "localhost", "0.0.0.0"].includes(u.hostname)) {
-    for (const list of Object.values(networkInterfaces()))
-      for (const a of list ?? [])
-        if (a.family === "IPv4" && !a.internal && /^(192\.168|10\.|172\.(1[6-9]|2\d|3[01]))/.test(a.address))
-          return `${u.protocol}//${a.address}${u.port ? ":" + u.port : ""}`;
-  }
-  return u.origin;
+  return new URL(reqOrigin).origin;
 }

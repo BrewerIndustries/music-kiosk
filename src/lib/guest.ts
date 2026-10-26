@@ -1,27 +1,42 @@
-// Guest (QR) request guards: party code + per-IP rate limit.
+// Guest (QR) request guards: party code + the request rules in Settings ▸ Guests.
 import { NextRequest } from "next/server";
 import { db } from "./db";
 import { getSettings } from "./settings";
 
-export const GUEST_LIMIT = 3; // requests…
-export const GUEST_WINDOW_MS = 10 * 60_000; // …per this window, per IP
+// Whole-network ceiling per window. Generous on purpose: at a venue every guest on
+// the Wi-Fi shares one IP, so the real limit is per phone (guest id).
+const NETWORK_CEILING = 150;
 
 export function codeOk(code: string | null) {
   return Boolean(code) && code!.toUpperCase() === getSettings().partyCode;
 }
 
 export function clientIp(req: NextRequest) {
-  return req.headers.get("x-forwarded-for")?.split(",")[0].trim() || req.headers.get("x-real-ip") || "local";
+  return (
+    req.headers.get("cf-connecting-ip") ||
+    req.headers.get("x-forwarded-for")?.split(",")[0].trim() ||
+    req.headers.get("x-real-ip") ||
+    "local"
+  );
 }
 
-// Records a hit and returns false if this IP is over the limit.
-export function takeGuestSlot(ip: string): boolean {
-  const since = Date.now() - GUEST_WINDOW_MS;
-  db().prepare(`DELETE FROM guest_hits WHERE at < ?`).run(since);
-  const { n } = db().prepare(`SELECT COUNT(*) AS n FROM guest_hits WHERE ip = ?`).get(ip) as { n: number };
-  if (n >= GUEST_LIMIT) return false;
-  db().prepare(`INSERT INTO guest_hits (ip, at) VALUES (?, ?)`).run(ip, Date.now());
-  return true;
+// Records a request and returns an error message if it's over the limits: the
+// per-phone limit from Settings (phones without an id count by IP), plus a
+// network-wide ceiling. guest_hits.ip holds the counting key.
+export function takeGuestSlot(ip: string, guestId: string | null): string | null {
+  const { guestLimit, guestWindowMin } = getSettings();
+  const windowMs = guestWindowMin * 60_000;
+  db().prepare(`DELETE FROM guest_hits WHERE at < ?`).run(Date.now() - Math.max(windowMs, 10 * 60_000));
+  const count = (key: string, ms: number) =>
+    (db().prepare(`SELECT COUNT(*) AS n FROM guest_hits WHERE ip = ? AND at >= ?`).get(key, Date.now() - ms) as { n: number }).n;
+  const phone = guestId ? `g:${guestId}` : `ip:${ip}`;
+  if (guestLimit > 0 && count(phone, windowMs) >= guestLimit)
+    return `Easy, DJ — ${guestLimit} request${guestLimit === 1 ? "" : "s"} every ${guestWindowMin} minutes. Try again soon.`;
+  if (count(`net:${ip}`, 10 * 60_000) >= NETWORK_CEILING) return "Lots of requests right now — try again in a few minutes.";
+  const now = Date.now();
+  db().prepare(`INSERT INTO guest_hits (ip, at) VALUES (?, ?)`).run(phone, now);
+  db().prepare(`INSERT INTO guest_hits (ip, at) VALUES (?, ?)`).run(`net:${ip}`, now);
+  return null;
 }
 
 // A random id each guest phone makes for itself (localStorage), so it can find

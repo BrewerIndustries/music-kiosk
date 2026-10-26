@@ -1,0 +1,50 @@
+{
+  // Music Kiosk — one Worker: the static UI (Next.js export in out/) + /api/* handled
+  // by the single Kiosk Durable Object (SQLite state + the playback engine on alarms).
+  // Default (top-level) env = PROD: musickiosk.dabrewer.dev. `--env dev` = DEV:
+  // musickiosk-dev.dabrewer.dev.
+  // Secrets (per env, `wrangler secret put <NAME> [--env dev]`):
+  //   SPOTIFY_CLIENT_ID, SPOTIFY_CLIENT_SECRET, SESSION_SECRET, SOUNDBOARD_TOKEN
+  //   (SOUNDBOARD_TOKEN = that Soundboard env's JARVIS_TOKEN)
+  // Email: `send_email` binding EMAIL (Cloudflare Email Sending, noreply@dabrewer.dev);
+  //   sends fail soft (link logged + shown to admins) until the domain is onboarded.
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "musickiosk",
+  "main": "src/server/worker.ts",
+  "compatibility_date": "2026-10-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "account_id": "c7961085693c68b85b3f19dc03e15266",
+  "workers_dev": false,
+  "preview_urls": false,
+  "observability": { "enabled": true },
+  // The API routes keep their Next.js imports; at bundle time they get the shim.
+  "alias": { "next/server": "./src/server/next-shim.ts" },
+  "assets": { "directory": "./out", "binding": "ASSETS", "not_found_handling": "404-page" },
+  "durable_objects": { "bindings": [{ "name": "KIOSK", "class_name": "KioskObject" }] },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["KioskObject"] }],
+  "routes": [{ "pattern": "musickiosk.dabrewer.dev", "custom_domain": true }],
+  "vars": {
+    "SPOTIFY_REDIRECT_URI": "https://musickiosk.dabrewer.dev/api/spotify/callback",
+    "SOUNDBOARD_URL": "https://soundboard.dabrewer.dev",
+    "BOOTSTRAP_ADMIN_EMAIL": "myemailisdanmail@gmail.com"
+  },
+  "services": [{ "binding": "SOUNDBOARD", "service": "soundboard" }],
+  "send_email": [{ "name": "EMAIL" }],
+
+  "env": {
+    "dev": {
+      "name": "musickiosk-dev",
+      "workers_dev": false,
+      "preview_urls": false,
+      "routes": [{ "pattern": "musickiosk-dev.dabrewer.dev", "custom_domain": true }],
+      "durable_objects": { "bindings": [{ "name": "KIOSK", "class_name": "KioskObject" }] },
+      "vars": {
+        "SPOTIFY_REDIRECT_URI": "https://musickiosk-dev.dabrewer.dev/api/spotify/callback",
+        "SOUNDBOARD_URL": "https://soundboard-dev.dabrewer.dev",
+        "BOOTSTRAP_ADMIN_EMAIL": "myemailisdanmail@gmail.com"
+      },
+      "services": [{ "binding": "SOUNDBOARD", "service": "soundboard-dev" }],
+      "send_email": [{ "name": "EMAIL" }]
+    }
+  }
+}

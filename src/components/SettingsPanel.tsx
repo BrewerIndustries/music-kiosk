@@ -3,6 +3,7 @@ import { useState } from "react";
 import { call } from "@/lib/client";
 import { PlaylistPicker } from "./PlaylistPicker";
 import type { KioskState, Notify } from "./types";
+import { AccountSection, UsersSection } from "./Account";
 
 export function SettingsPanel({
   state,
@@ -171,13 +172,11 @@ export function SettingsPanel({
           >
             Disconnect Spotify
           </button>
-          {state.pinRequired && (
-            <button className="btn" onClick={() => call("DELETE", "/api/unlock").then(() => location.reload())}>
-              Lock this device
-            </button>
-          )}
         </div>
       </section>
+
+      <AccountSection state={state} notify={notify} />
+      <UsersSection state={state} notify={notify} />
     </div>
   );
 }

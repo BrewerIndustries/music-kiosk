@@ -1,10 +1,7 @@
-import { GuestRequest } from "@/components/GuestRequest";
-
-export const dynamic = "force-dynamic";
+import { GuestRequestPage } from "@/components/GuestRequest";
 
 export const metadata = { title: "Request a song" };
 
-export default async function RequestPage({ searchParams }: { searchParams: Promise<{ code?: string }> }) {
-  const { code } = await searchParams;
-  return <GuestRequest code={(code ?? "").toUpperCase()} />;
+export default function RequestPage() {
+  return <GuestRequestPage />;
 }

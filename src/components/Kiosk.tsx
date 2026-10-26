@@ -10,6 +10,7 @@ import { SoundsPanel } from "./SoundsPanel";
 import { GuestsPanel } from "./GuestsPanel";
 import { SettingsPanel } from "./SettingsPanel";
 import type { KioskState } from "./types";
+import { SignIn } from "./Account";
 
 type Tab = "queue" | "search" | "sounds" | "guests" | "settings";
 
@@ -199,7 +200,7 @@ export function Kiosk({ envLabel }: { envLabel: string | null }) {
   };
 
   if (!state) return <Splash>{offline ? "Can’t reach the kiosk server…" : "Loading…"}</Splash>;
-  if (state.locked) return <PinPad />;
+  if (state.locked) return <SignIn />;
   if (!state.spotify?.configured) return <SetupNeeded />;
   if (!connected)
     return (
@@ -353,39 +354,3 @@ function SetupNeeded() {
   );
 }
 
-function PinPad() {
-  const [pin, setPin] = useState("");
-  const [error, setError] = useState(false);
-  const submit = (p: string) =>
-    call("POST", "/api/unlock", { pin: p })
-      .then(() => location.reload())
-      .catch(() => {
-        setError(true);
-        setPin("");
-      });
-  const press = (d: string) => {
-    setError(false);
-    const next = (pin + d).slice(0, 8);
-    setPin(next);
-  };
-  return (
-    <Splash>
-      <div className="text-4xl">🔒</div>
-      <h1 className="mt-3 text-xl font-semibold">Enter kiosk PIN</h1>
-      <div className={`mt-4 h-8 font-mono text-2xl tracking-[0.5em] ${error ? "text-red-400" : ""}`}>
-        {pin.replace(/./g, "•") || (error ? "wrong" : "")}
-      </div>
-      <div className="mt-4 grid grid-cols-3 gap-3">
-        {["1", "2", "3", "4", "5", "6", "7", "8", "9", "⌫", "0", "OK"].map((k) => (
-          <button
-            key={k}
-            className="btn-round btn-round-lg text-xl"
-            onClick={() => (k === "⌫" ? setPin(pin.slice(0, -1)) : k === "OK" ? submit(pin) : press(k))}
-          >
-            {k}
-          </button>
-        ))}
-      </div>
-    </Splash>
-  );
-}
