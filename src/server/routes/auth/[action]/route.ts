@@ -9,7 +9,9 @@ import {
   issueLinkToken,
   MIN_PASSWORD,
   normEmail,
+  overLimit,
   peekLinkToken,
+  recordHit,
   revokeSessions,
   SESSION_COOKIE,
   sessionCookie,
@@ -61,9 +63,13 @@ export function POST(req: NextRequest, ctx: Ctx) {
 
     if (action === "login") {
       const email = normEmail(b.email);
-      if (!allow(`login-ip:${ip}`, 20) || !allow(`login:${email}`, 10)) return tooMany();
+      if (overLimit(`login-ip:${ip}`, 20) || overLimit(`login:${email}`, 10)) return tooMany();
       const user = await checkLogin(email, password);
-      if (!user) return NextResponse.json({ error: "Wrong email or password." }, { status: 401 });
+      if (!user) {
+        recordHit(`login-ip:${ip}`);
+        recordHit(`login:${email}`);
+        return NextResponse.json({ error: "Wrong email or password." }, { status: 401 });
+      }
       return signedIn(createSession(user.id), { user });
     }
 

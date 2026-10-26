@@ -236,10 +236,18 @@ export function peekLinkToken(token: string): { email: string; purpose: string }
 
 // Records a hit for `key` and returns false once it's over `max` in the window.
 export function allow(key: string, max = 10, windowMs = 15 * 60_000): boolean {
-  const since = Date.now() - windowMs;
-  db().prepare(`DELETE FROM auth_hits WHERE at < ?`).run(since);
-  const n = (db().prepare(`SELECT COUNT(*) AS n FROM auth_hits WHERE key = ?`).get(key) as { n: number }).n;
-  if (n >= max) return false;
-  db().prepare(`INSERT INTO auth_hits (key, at) VALUES (?, ?)`).run(key, Date.now());
+  if (overLimit(key, max, windowMs)) return false;
+  recordHit(key);
   return true;
+}
+
+// For sign-in: check first, and record only failures, so devices sharing venue
+// Wi-Fi (one IP) can't lock each other out just by signing in.
+export function overLimit(key: string, max = 10, windowMs = 15 * 60_000): boolean {
+  db().prepare(`DELETE FROM auth_hits WHERE at < ?`).run(Date.now() - windowMs);
+  return (db().prepare(`SELECT COUNT(*) AS n FROM auth_hits WHERE key = ?`).get(key) as { n: number }).n >= max;
+}
+
+export function recordHit(key: string) {
+  db().prepare(`INSERT INTO auth_hits (key, at) VALUES (?, ?)`).run(key, Date.now());
 }

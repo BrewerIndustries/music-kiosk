@@ -39,10 +39,22 @@ export class KioskObject extends DurableObject<Env> {
   }
 }
 
+// SameSite=Lax still lets sibling *.dabrewer.dev sites send the session cookie, so
+// writes must come from this origin. Local dev (Next on :3000 proxying to :8787) is exempt.
+function crossOriginWrite(request: Request, url: URL) {
+  if (request.method === "GET" || request.method === "HEAD") return false;
+  const origin = request.headers.get("origin");
+  if (!origin || origin === url.origin) return false;
+  return !/^(localhost|127\.0\.0\.1)$/.test(url.hostname);
+}
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
-    if (url.pathname.startsWith("/api/")) return env.KIOSK.get(env.KIOSK.idFromName("kiosk")).fetch(request);
+    if (url.pathname.startsWith("/api/")) {
+      if (crossOriginWrite(request, url)) return Response.json({ error: "cross-origin request refused" }, { status: 403 });
+      return env.KIOSK.get(env.KIOSK.idFromName("kiosk")).fetch(request);
+    }
     return env.ASSETS.fetch(request);
   },
 } satisfies ExportedHandler<Env>;
