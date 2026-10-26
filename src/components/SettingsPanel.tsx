@@ -1,9 +1,8 @@
 "use client";
-import { useEffect, useState } from "react";
-import { call, toPlaylistUri } from "@/lib/client";
+import { useState } from "react";
+import { call } from "@/lib/client";
+import { PlaylistPicker } from "./PlaylistPicker";
 import type { KioskState, Notify } from "./types";
-
-type Playlist = { uri: string; name: string; image: string | null; total: number };
 
 export function SettingsPanel({
   state,
@@ -17,17 +16,8 @@ export function SettingsPanel({
   onClaimAudio: () => void;
 }) {
   const s = state.settings;
-  const [playlists, setPlaylists] = useState<Playlist[] | null>(null);
-  const [paste, setPaste] = useState("");
   const [duck, setDuck] = useState(s?.duckPercent ?? 20);
   const [guestBase, setGuestBase] = useState(s?.guestBaseUrl ?? "");
-
-  useEffect(() => {
-    if (!state.spotify?.connected) return;
-    call<{ playlists: Playlist[] }>("GET", "/api/playlists")
-      .then((r) => setPlaylists(r.playlists))
-      .catch((e) => notify(e.message));
-  }, [state.spotify?.connected, notify]);
 
   const save = (p: Record<string, unknown>) =>
     call("POST", "/api/settings", p)
@@ -44,44 +34,7 @@ export function SettingsPanel({
           Plays whenever Up Next is empty. Current:{" "}
           <span className="text-ink">{s?.playlistName ?? "none picked"}</span>
         </p>
-        <div className="flex gap-2">
-          <input
-            className="input"
-            placeholder="Paste a Spotify playlist link…"
-            value={paste}
-            onChange={(e) => setPaste(e.target.value)}
-          />
-          <button
-            className="btn btn-primary"
-            onClick={() => {
-              const uri = toPlaylistUri(paste);
-              if (!uri) return notify("That doesn't look like a Spotify playlist link");
-              pickPlaylist(uri, playlists?.find((p) => p.uri === uri)?.name ?? "Pasted playlist");
-              setPaste("");
-            }}
-          >
-            Use
-          </button>
-        </div>
-        {playlists && (
-          <div className="mt-3 max-h-72 space-y-1 overflow-y-auto">
-            {playlists.map((p) => (
-              <button
-                key={p.uri}
-                onClick={() => pickPlaylist(p.uri, p.name)}
-                className={`flex w-full items-center gap-3 rounded-lg px-2 py-1.5 text-left hover:bg-line/50 ${
-                  p.uri === s?.playlistUri ? "text-accent" : ""
-                }`}
-              >
-                <div className="art h-9 w-9 shrink-0">
-                  {p.image ? <img src={p.image} alt="" className="h-full w-full object-cover" /> : <span>♪</span>}
-                </div>
-                <span className="min-w-0 flex-1 truncate text-sm">{p.name}</span>
-                <span className="text-xs text-muted">{p.total || ""}</span>
-              </button>
-            ))}
-          </div>
-        )}
+        <PlaylistPicker currentUri={s?.playlistUri ?? null} notify={notify} onPick={pickPlaylist} maxHeight="max-h-72" />
       </section>
 
       <section className="card space-y-4 p-4 text-sm">

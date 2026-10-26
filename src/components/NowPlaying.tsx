@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { call, fmtTime } from "@/lib/client";
+import { PlaylistPicker } from "./PlaylistPicker";
 import type { KioskState, Notify, SpDevice } from "./types";
 
 type Props = {
@@ -14,6 +15,7 @@ export function NowPlaying({ state, notify, sdkDeviceId }: Props) {
   const track = pb?.track;
   const [now, setNow] = useState(() => Date.now());
   const [devicesOpen, setDevicesOpen] = useState(false);
+  const [playlistOpen, setPlaylistOpen] = useState(false);
 
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 500);
@@ -26,7 +28,33 @@ export function NowPlaying({ state, notify, sdkDeviceId }: Props) {
   const act = (action: string, extra: Record<string, unknown> = {}) =>
     call("POST", "/api/player", { action, ...extra }).catch((e) => notify(e.message));
 
-  const startPlaylist = () => act("startPlaylist", { deviceId: pb?.device.id ?? sdkDeviceId ?? undefined });
+  const playlistUri = state.settings?.playlistUri ?? null;
+  const targetDevice = pb?.device?.id ?? sdkDeviceId ?? undefined;
+
+  const startPlaylist = () => {
+    if (!playlistUri) {
+      setPlaylistOpen(true);
+      return;
+    }
+    act("startPlaylist", { deviceId: targetDevice });
+  };
+
+  // Picking a playlist makes it the backdrop and starts it right away.
+  const choosePlaylist = async (uri: string, name: string) => {
+    setPlaylistOpen(false);
+    try {
+      await call("POST", "/api/settings", { playlistUri: uri, playlistName: name });
+      if (!targetDevice) {
+        notify(`“${name}” is set — choose a player to start it`);
+        setDevicesOpen(true);
+        return;
+      }
+      await call("POST", "/api/player", { action: "startPlaylist", deviceId: targetDevice });
+      notify(`Playing “${name}”`);
+    } catch (e) {
+      notify((e as Error).message);
+    }
+  };
 
   return (
     <section className="card p-4">
@@ -97,12 +125,27 @@ export function NowPlaying({ state, notify, sdkDeviceId }: Props) {
       )}
 
       <div className="mt-3 flex flex-wrap items-center gap-2 text-sm">
-        <button className="chip" onClick={() => setDevicesOpen((o) => !o)}>
+        <button
+          className={`chip ${playlistOpen ? "chip-on" : ""} ${!playlistUri ? "border-accent text-accent" : ""}`}
+          onClick={() => {
+            setPlaylistOpen((o) => !o);
+            setDevicesOpen(false);
+          }}
+        >
+          🎵 {state.settings?.playlistName ?? "Choose a playlist"} ▾
+        </button>
+        <button
+          className={`chip ${devicesOpen ? "chip-on" : ""}`}
+          onClick={() => {
+            setDevicesOpen((o) => !o);
+            setPlaylistOpen(false);
+          }}
+        >
           🔈 {pb?.device?.name ?? "Choose a player"}
         </button>
-        {state.settings?.playlistUri && (
-          <button className="chip" onClick={startPlaylist} title="Start the backdrop playlist from the top">
-            ↺ Restart playlist
+        {playlistUri && (
+          <button className="chip" onClick={startPlaylist} title="Start the playlist from the top">
+            ↺ Restart
           </button>
         )}
         {pb && (
@@ -111,6 +154,13 @@ export function NowPlaying({ state, notify, sdkDeviceId }: Props) {
           </button>
         )}
       </div>
+
+      {playlistOpen && (
+        <div className="mt-3 rounded-xl border border-line p-2">
+          <div className="mb-2 px-1 text-xs uppercase tracking-wider text-muted">Play this playlist when Up Next is empty</div>
+          <PlaylistPicker currentUri={playlistUri} notify={notify} onPick={choosePlaylist} />
+        </div>
+      )}
 
       {devicesOpen && (
         <DevicePicker
