@@ -11,6 +11,6 @@ export function GET(req: NextRequest) {
   if (!codeOk(p.get("code"))) return NextResponse.json({ error: "bad party code" }, { status: 403 });
   return handle(async () => {
     const q = p.get("q")?.trim().slice(0, 100);
-    return NextResponse.json({ tracks: q ? await searchTracks(q, 15) : [] });
+    return NextResponse.json({ tracks: q ? await searchTracks(q, 10) : [] });
   });
 }

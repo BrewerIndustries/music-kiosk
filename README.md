@@ -60,6 +60,9 @@ listed users). Premium is required.
 
 Open the kiosk at **127.0.0.1** (not localhost) so the OAuth cookie matches.
 
+**Dev-mode gotcha:** Spotify caps `/search` at `limit=10` for development-mode apps
+(`limit=11+` → 400 "Invalid limit"; no limit → 5). `searchTracks()` pages in 10s.
+
 ## Environments (planned — jarvis server, `dan@100.102.159.57`)
 
 | Env  | Branch | Port | URL (TBD) |

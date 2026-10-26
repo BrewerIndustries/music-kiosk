@@ -177,13 +177,26 @@ export function summarize(t: SpTrack): TrackSummary {
   };
 }
 
-export async function searchTracks(q: string, limit = 20): Promise<TrackSummary[]> {
-  const res = await api<{ tracks: { items: SpTrack[] } }>("GET", "/search", undefined, {
-    q,
-    type: "track",
-    limit: String(limit),
-  });
-  return (res?.tracks.items ?? []).filter(Boolean).map(summarize);
+// Spotify caps search at 10 results per request for development-mode apps (11+
+// returns 400 "Invalid limit"), so larger result sets are fetched in pages of 10.
+const SEARCH_PAGE = 10;
+
+export async function searchTracks(q: string, total = 20): Promise<TrackSummary[]> {
+  const pages = await Promise.all(
+    Array.from({ length: Math.ceil(total / SEARCH_PAGE) }, (_, i) =>
+      api<{ tracks: { items: SpTrack[] } }>("GET", "/search", undefined, {
+        q,
+        type: "track",
+        limit: String(SEARCH_PAGE),
+        offset: String(i * SEARCH_PAGE),
+      }),
+    ),
+  );
+  const seen = new Set<string>();
+  return pages
+    .flatMap((p) => p?.tracks.items ?? [])
+    .filter((t) => t && !seen.has(t.uri) && seen.add(t.uri))
+    .map(summarize);
 }
 
 export async function getPlayback(): Promise<SpPlayback | null> {
