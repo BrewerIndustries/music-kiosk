@@ -85,6 +85,33 @@ export function SettingsPanel({
         </div>
       </section>
 
+      <section className="card p-4 text-sm">
+        <div className="flex items-center justify-between">
+          <h2 className="section-title">Recent errors</h2>
+          {(state.errors?.length ?? 0) > 0 && (
+            <button className="text-xs text-muted hover:text-ink" onClick={() => call("DELETE", "/api/errors")}>
+              Clear
+            </button>
+          )}
+        </div>
+        {!state.errors?.length ? (
+          <p className="text-xs text-muted">None. Failures also go to the server log.</p>
+        ) : (
+          <ul className="max-h-64 space-y-2 overflow-y-auto">
+            {state.errors.map((e, i) => (
+              <li key={`${e.at}-${i}`} className="rounded-lg bg-bg px-3 py-2">
+                <div className="flex justify-between gap-2 text-xs text-muted">
+                  <span className="truncate font-mono">{e.where}</span>
+                  <span className="shrink-0">{new Date(e.at).toLocaleTimeString()}</span>
+                </div>
+                <div className="mt-0.5 break-words text-red-300">{e.message}</div>
+                {e.detail && <div className="mt-0.5 break-words font-mono text-xs text-muted">{e.detail}</div>}
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
       <section className="card space-y-3 p-4 text-sm">
         <h2 className="section-title">Spotify</h2>
         <div>

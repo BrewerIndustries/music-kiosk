@@ -3,6 +3,7 @@
 // the cached snapshot from here instead of hitting Spotify itself.
 import { api, getPlayback, isConnected, summarize, SpotifyError, type SpPlayback, type SpTrack, type TrackSummary } from "./spotify";
 import { decide, initialMemory, type Memory } from "./engine-core";
+import { logError, recentErrors } from "./log";
 import { getItem, head, moveToFront, setStatus, type QueueItem } from "./queue";
 
 const CLIP_TIMEOUT_MS = 5 * 60_000; // give up on a queued clip the browser never finished
@@ -112,8 +113,7 @@ async function tick() {
 
       for (const a of decision.actions) {
         if (a.type === "enqueue") {
-          await api("POST", "/me/player/queue", undefined, { uri: a.uri });
-          setStatus(a.id, "handed_off");
+          await handOff(a.id, a.uri);
         } else if (a.type === "started" || a.type === "lost") {
           setStatus(a.id, "played");
         } else if (a.type === "pauseForClip") {
@@ -130,7 +130,10 @@ async function tick() {
         await refreshUpcoming(uri).catch(() => {});
     }
   } catch (e) {
-    s.error = e instanceof Error ? e.message : String(e);
+    const message = e instanceof Error ? e.message : String(e);
+    // The loop retries every few seconds; log each distinct failure once.
+    if (message !== s.error) logError("engine", e, e instanceof SpotifyError ? `spotify ${e.endpoint}, HTTP ${e.status}` : undefined);
+    s.error = message;
     delay = e instanceof SpotifyError && e.status === 429 ? 10_000 : 3000;
   }
   schedule(delay);
@@ -154,6 +157,25 @@ async function refreshUpcoming(currentUri: string | null) {
 }
 
 g._kioskTick = tick;
+
+// Put one of our tracks into Spotify's queue. Spotify's queue can't be edited, so a
+// duplicate send means the song plays twice: mark it handed off FIRST, and only undo
+// that when Spotify definitely refused it (4xx). On an ambiguous failure (network,
+// 5xx) assume it went through rather than risk queueing it again.
+async function handOff(id: string, uri: string) {
+  const s = state();
+  setStatus(id, "handed_off");
+  s.memory = { ...s.memory, handoff: { id, uri, trackChanges: 0 } };
+  try {
+    await api("POST", "/me/player/queue", undefined, { uri });
+  } catch (e) {
+    if (e instanceof SpotifyError && e.status >= 400 && e.status < 500) {
+      setStatus(id, "queued");
+      if (s.memory.handoff?.id === id) s.memory = { ...s.memory, handoff: null };
+    }
+    throw e;
+  }
+}
 
 function hostAlive(): boolean {
   const h = state().audioHost;
@@ -184,11 +206,7 @@ export async function finishClip(id: string) {
   // If a track is next in Up Next, hand it off before skipping so it plays now;
   // otherwise skipping resumes the playlist.
   const h = head();
-  if (h?.kind === "track" && h.uri) {
-    await api("POST", "/me/player/queue", undefined, { uri: h.uri });
-    setStatus(h.id, "handed_off");
-    s.memory = { ...s.memory, handoff: { id: h.id, uri: h.uri, trackChanges: 0 } };
-  }
+  if (h?.kind === "track" && h.uri) await handOff(h.id, h.uri);
   await api("POST", "/me/player/next");
   await api("PUT", "/me/player/play").catch(() => {}); // some devices stay paused after next
   poke();
@@ -213,10 +231,26 @@ export async function playNow(id: string) {
     setStatus(s.memory.handoff.id, "queued");
     s.memory = { ...s.memory, handoff: null };
   }
-  await api("POST", "/me/player/queue", undefined, { uri: item.uri! });
-  setStatus(id, "handed_off");
-  s.memory = { ...s.memory, handoff: { id, uri: item.uri!, trackChanges: 0 } };
+  await handOff(id, item.uri!);
   for (let i = 0; i < skips; i++) await api("POST", "/me/player/next");
+  poke();
+}
+
+// Jump to a track in the "Then from <playlist>" list. Spotify has no "skip to queue
+// position", so restart the current context at that track (keeps the playlist and
+// anything already in Spotify's queue); if that's refused, press next enough times.
+export async function skipToUpcoming(uri: string, index: number) {
+  const s = state();
+  const ctx = s.playback?.context?.uri;
+  const deviceId = s.playback?.device?.id ?? undefined;
+  try {
+    if (!ctx) throw new Error("no context");
+    await api("PUT", "/me/player/play", { context_uri: ctx, offset: { uri } }, { device_id: deviceId });
+  } catch {
+    // Our handed-off track sits ahead of the playlist in Spotify's queue.
+    const skips = index + 1 + (s.memory.handoff ? 1 : 0);
+    for (let i = 0; i < skips; i++) await api("POST", "/me/player/next");
+  }
   poke();
 }
 
@@ -289,5 +323,6 @@ export function snapshot() {
     nowPlayingItem: s.memory.nowPlayingId ? getItem(s.memory.nowPlayingId) : null,
     ducked: Boolean(s.duck),
     upcoming: s.upcoming,
+    errors: recentErrors().slice(0, 15),
   };
 }

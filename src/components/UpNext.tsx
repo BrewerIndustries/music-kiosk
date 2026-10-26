@@ -52,7 +52,15 @@ export function UpNext({ state, notify }: { state: KioskState; notify: Notify })
           </h3>
           <ol className="space-y-0.5">
             {upcoming.map((t, i) => (
-              <PlaylistRow key={`${t.uri}-${i}`} track={t} />
+              <PlaylistRow
+                key={`${t.uri}-${i}`}
+                track={t}
+                onPlay={() =>
+                  call("POST", "/api/player", { action: "skipTo", uri: t.uri, index: i })
+                    .then(() => notify(`Skipping to “${t.title}”`))
+                    .catch((e) => notify(e.message))
+                }
+              />
             ))}
           </ol>
         </>
@@ -64,17 +72,24 @@ export function UpNext({ state, notify }: { state: KioskState; notify: Notify })
   );
 }
 
-function PlaylistRow({ track }: { track: TrackSummary }) {
+function PlaylistRow({ track, onPlay }: { track: TrackSummary; onPlay: () => void }) {
   return (
-    <li className="flex items-center gap-3 rounded-lg px-2 py-1 opacity-70">
-      <div className="art h-9 w-9 shrink-0 text-sm">
-        {track.art ? <img src={track.art} alt="" className="h-full w-full object-cover" /> : <span>♪</span>}
-      </div>
-      <div className="min-w-0 flex-1">
-        <div className="truncate text-sm">{track.title}</div>
-        <div className="truncate text-xs text-muted">{track.subtitle}</div>
-      </div>
-      <span className="shrink-0 text-xs tabular-nums text-muted">{fmtTime(track.durationMs)}</span>
+    <li>
+      <button
+        onClick={onPlay}
+        title="Skip to this song"
+        className="group flex w-full items-center gap-3 rounded-lg px-2 py-1 text-left opacity-70 hover:bg-line/50 hover:opacity-100"
+      >
+        <div className="art relative h-9 w-9 shrink-0 text-sm">
+          {track.art ? <img src={track.art} alt="" className="h-full w-full object-cover" /> : <span>♪</span>}
+          <span className="absolute inset-0 hidden items-center justify-center bg-black/50 text-white group-hover:flex">▶</span>
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-sm">{track.title}</div>
+          <div className="truncate text-xs text-muted">{track.subtitle}</div>
+        </div>
+        <span className="shrink-0 text-xs tabular-nums text-muted">{fmtTime(track.durationMs)}</span>
+      </button>
     </li>
   );
 }
@@ -99,17 +114,27 @@ function Row({
   const locked = item.status === "handed_off"; // already in Spotify's queue / playing
   return (
     <li className="flex items-center gap-3 rounded-lg px-2 py-1.5 hover:bg-line/50">
-      <div className="art h-10 w-10 shrink-0 text-base">
-        {item.art ? <img src={item.art} alt="" className="h-full w-full object-cover" /> : <span>{item.kind === "clip" ? "🔊" : "♪"}</span>}
-      </div>
-      <div className="min-w-0 flex-1">
-        <div className="truncate text-sm font-medium">{item.title}</div>
-        <div className="truncate text-xs text-muted">
-          {item.kind === "clip" ? "Sound clip" : item.subtitle}
-          {item.requestedBy ? ` · ${item.requestedBy}` : ""}
-          {item.durationMs ? ` · ${fmtTime(item.durationMs)}` : ""}
+      <button
+        onClick={locked ? undefined : onPlayNow}
+        disabled={locked}
+        title={locked ? undefined : "Play now"}
+        className="group flex min-w-0 flex-1 items-center gap-3 text-left disabled:opacity-100"
+      >
+        <div className="art relative h-10 w-10 shrink-0 text-base">
+          {item.art ? <img src={item.art} alt="" className="h-full w-full object-cover" /> : <span>{item.kind === "clip" ? "🔊" : "♪"}</span>}
+          {!locked && (
+            <span className="absolute inset-0 hidden items-center justify-center bg-black/50 text-white group-hover:flex">▶</span>
+          )}
         </div>
-      </div>
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-sm font-medium">{item.title}</div>
+          <div className="truncate text-xs text-muted">
+            {item.kind === "clip" ? "Sound clip" : item.subtitle}
+            {item.requestedBy ? ` · ${item.requestedBy}` : ""}
+            {item.durationMs ? ` · ${fmtTime(item.durationMs)}` : ""}
+          </div>
+        </div>
+      </button>
       {locked ? (
         <span className="text-xs text-accent">{item.kind === "clip" ? "playing" : "next"}</span>
       ) : (

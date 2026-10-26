@@ -78,12 +78,16 @@ export class SpotifyError extends Error {
   constructor(
     public status: number,
     message: string,
+    public endpoint?: string, // e.g. "POST /me/player/queue" (for the error log)
   ) {
     super(message);
   }
 }
 
-// Calls the Web API. Returns null for 204/202 (player endpoints return no body).
+// Calls the Web API. Returns parsed JSON, or null when there's no JSON body. Player
+// commands (play/pause/next/queue/repeat…) answer 200 with a bare snapshot-id string,
+// not JSON — treat any unparseable success body as "ok, nothing to return". (Parsing
+// it used to throw *after* Spotify had acted, so retries queued songs twice.)
 export async function api<T>(
   method: string,
   path: string,
@@ -119,11 +123,16 @@ export async function api<T>(
       try {
         msg = JSON.parse(text).error?.message ?? text;
       } catch {}
-      throw new SpotifyError(res.status, msg);
+      throw new SpotifyError(res.status, msg || `HTTP ${res.status}`, `${method} ${path}`);
     }
-    return text ? (JSON.parse(text) as T) : null;
+    if (!text) return null;
+    try {
+      return JSON.parse(text) as T;
+    } catch {
+      return null;
+    }
   }
-  throw new SpotifyError(429, "rate limited");
+  throw new SpotifyError(429, "rate limited", `${method} ${path}`);
 }
 
 // ---- Typed slices of the API we use --------------------------------------

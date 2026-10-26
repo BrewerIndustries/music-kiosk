@@ -12,5 +12,5 @@ export function GET(req: NextRequest) {
   return handle(async () => {
     const q = p.get("q")?.trim().slice(0, 100);
     return NextResponse.json({ tracks: q ? await searchTracks(q, 10) : [] });
-  });
+  }, req);
 }

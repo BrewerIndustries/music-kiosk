@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { api } from "@/lib/spotify";
-import { duck, instantPause, instantResume, poke, unduck } from "@/lib/engine";
+import { duck, instantPause, instantResume, poke, skipToUpcoming, unduck } from "@/lib/engine";
 import { getSettings } from "@/lib/settings";
 import { adminRoute } from "@/lib/auth";
 
@@ -9,6 +9,7 @@ export const dynamic = "force-dynamic";
 // POST /api/player { action, ... } — transport controls + clip helpers.
 //   play | pause | next | previous | volume {percent} | shuffle {on}
 //   transfer {deviceId, play?} | startPlaylist {deviceId?}
+//   skipTo {uri, index}   (jump to a track in the upcoming playlist list)
 //   duck | unduck | instantPause | instantResume   (used around instant clips)
 export function POST(req: NextRequest) {
   return adminRoute(req, async () => {
@@ -46,6 +47,11 @@ export function POST(req: NextRequest) {
         await api("PUT", "/me/player/repeat", undefined, { state: "context", device_id: deviceId }).catch(() => {});
         break;
       }
+      case "skipTo":
+        if (typeof b.uri !== "string" || !b.uri.startsWith("spotify:track:"))
+          return NextResponse.json({ error: "uri required" }, { status: 400 });
+        await skipToUpcoming(b.uri, Math.max(0, Number(b.index) || 0));
+        break;
       case "duck":
         result = { method: await duck(getSettings().duckPercent) };
         break;

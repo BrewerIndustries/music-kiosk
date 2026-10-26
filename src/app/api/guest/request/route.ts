@@ -39,5 +39,5 @@ export function POST(req: NextRequest) {
     );
     poke();
     return NextResponse.json({ ok: true, pending: requireApproval }, { status: 201 });
-  });
+  }, req);
 }

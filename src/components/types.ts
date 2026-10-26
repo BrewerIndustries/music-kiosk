@@ -2,6 +2,7 @@
 import type { QueueItem } from "@/lib/queue";
 import type { KioskSettings } from "@/lib/settings";
 import type { SpDevice, TrackSummary } from "@/lib/spotify";
+import type { LoggedError } from "@/lib/log";
 
 export type { QueueItem, KioskSettings, SpDevice, TrackSummary };
 
@@ -22,6 +23,7 @@ export type KioskState = {
   nowPlayingItem?: QueueItem | null;
   ducked?: boolean;
   upcoming?: TrackSummary[];
+  errors?: LoggedError[];
   upNext?: QueueItem[];
   pending?: QueueItem[];
   recent?: QueueItem[];
