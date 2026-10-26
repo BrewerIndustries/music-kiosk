@@ -1,7 +1,7 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { call } from "@/lib/client";
-import { playQueuedClip, unlockAudio } from "@/lib/clipPlayer";
+import { playQueuedClip, setClipVolume, unlockAudio } from "@/lib/clipPlayer";
 import { useSpotifyPlayer } from "./useSpotifyPlayer";
 import { NowPlaying } from "./NowPlaying";
 import { UpNext } from "./UpNext";
@@ -85,6 +85,11 @@ export function Kiosk({ envLabel }: { envLabel: string | null }) {
       history.replaceState(null, "", "/");
     }
   }, [notify]);
+
+  const clipVolume = state?.settings?.clipVolume;
+  useEffect(() => {
+    if (clipVolume != null) setClipVolume(clipVolume);
+  }, [clipVolume]);
 
   // Queued clip handed to this tab by the engine: play it, then report back.
   const clip = state?.clip;

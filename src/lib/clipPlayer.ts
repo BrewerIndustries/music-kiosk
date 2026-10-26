@@ -13,6 +13,16 @@ export const clipUrl = (key: string) => `/api/soundboard/audio/${encodeURICompon
 
 const active = new Set<HTMLAudioElement>();
 
+// Soundboard volume (0–100), applied to every clip element. iOS ignores
+// element volume, so on iPhone/iPad clips follow the device volume buttons.
+let clipVolume = 1;
+
+export function setClipVolume(percent: number) {
+  clipVolume = Math.max(0, Math.min(1, percent / 100));
+  for (const a of active) a.volume = clipVolume;
+  if (hostAudio) hostAudio.volume = clipVolume;
+}
+
 function playToEnd(audio: HTMLAudioElement): Promise<void> {
   return new Promise((resolve) => {
     const done = () => {
@@ -23,6 +33,7 @@ function playToEnd(audio: HTMLAudioElement): Promise<void> {
     audio.addEventListener("error", done, { once: true });
     audio.addEventListener("pause", done, { once: true }); // stopAll()
     active.add(audio);
+    audio.volume = clipVolume;
     audio.play().catch(done);
   });
 }
@@ -45,8 +56,15 @@ export async function playClip(key: string, mode: ClipMode): Promise<string | nu
       method: "unsupported",
     }));
     if (method === "volume") {
-      await playToEnd(audio);
-      await call("POST", "/api/player", { action: "unduck" }).catch(() => {});
+      try {
+        await playToEnd(audio);
+      } finally {
+        // Always bring the music back; retry once, then fall back to a hard restore.
+        await call("POST", "/api/player", { action: "unduck" })
+          .catch(() => call("POST", "/api/player", { action: "unduck" }))
+          .catch(() => call("POST", "/api/player", { action: "restoreVolume" }))
+          .catch(() => {});
+      }
       return null;
     }
     const nav = navigator as AudioSessionNav;

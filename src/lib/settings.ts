@@ -5,7 +5,9 @@ import { getSetting, setSetting } from "./db";
 export type KioskSettings = {
   playlistUri: string | null; // the backdrop playlist
   playlistName: string | null;
-  duckPercent: number; // Spotify volume while a clip plays over the music
+  duckPercent: number; // music drops to this % of its volume while a clip plays over it
+  musicVolume: number | null; // the music's normal volume (restored after ducking)
+  clipVolume: number; // soundboard clip volume, 0–100
   requireApproval: boolean; // guest requests wait for admin approval
   partyCode: string; // in the guest link; rotate to lock old QR codes out
   guestBaseUrl: string | null; // override for the QR link (e.g. the public guest site)
@@ -25,7 +27,9 @@ export function getSettings(): KioskSettings {
   return {
     playlistUri: getSetting("playlist_uri"),
     playlistName: getSetting("playlist_name"),
-    duckPercent: Number(getSetting("duck_percent") ?? 20),
+    duckPercent: Number(getSetting("duck_percent") ?? 30),
+    musicVolume: getSetting("music_volume") != null ? Number(getSetting("music_volume")) : null,
+    clipVolume: Number(getSetting("clip_volume") ?? 100),
     requireApproval: getSetting("require_approval") === "1",
     partyCode,
     guestBaseUrl: getSetting("guest_base_url"),
@@ -37,6 +41,10 @@ export function updateSettings(p: Record<string, unknown>) {
   if ("playlistName" in p) setSetting("playlist_name", typeof p.playlistName === "string" ? p.playlistName : null);
   if (typeof p.duckPercent === "number")
     setSetting("duck_percent", String(Math.max(0, Math.min(100, Math.round(p.duckPercent)))));
+  if (typeof p.musicVolume === "number")
+    setSetting("music_volume", String(Math.max(0, Math.min(100, Math.round(p.musicVolume)))));
+  if (typeof p.clipVolume === "number")
+    setSetting("clip_volume", String(Math.max(0, Math.min(100, Math.round(p.clipVolume)))));
   if (typeof p.requireApproval === "boolean") setSetting("require_approval", p.requireApproval ? "1" : "0");
   if (p.rotatePartyCode === true) setSetting("party_code", randomCode());
   if ("guestBaseUrl" in p)

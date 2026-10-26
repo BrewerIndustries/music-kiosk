@@ -4,12 +4,15 @@
 import { api, getPlayback, isConnected, summarize, SpotifyError, type SpPlayback, type SpTrack, type TrackSummary } from "./spotify";
 import { decide, initialMemory, type Memory } from "./engine-core";
 import { logError, recentErrors } from "./log";
+import { getSettings, updateSettings } from "./settings";
 import { getItem, head, moveToFront, setStatus, type QueueItem } from "./queue";
 
 const CLIP_TIMEOUT_MS = 5 * 60_000; // give up on a queued clip the browser never finished
 const HOST_STALE_MS = 10_000; // a kiosk tab that hasn't polled in this long can't play clips
 const UPCOMING_REFRESH_MS = 15_000; // re-read Spotify's upcoming list at least this often
 const UPCOMING_SHOWN = 10;
+const DUCK_WATCHDOG_MS = 3 * 60_000; // restore the volume if a duck is somehow left on
+const VOLUME_SYNC_QUIET_MS = 6000;
 
 type EngineState = {
   started: boolean;
@@ -20,7 +23,13 @@ type EngineState = {
   error: string | null;
   // The kiosk browser tab that plays clips (latest to claim it, kept alive by polling).
   audioHost: { id: string; seenAt: number } | null;
-  duck: { previousVolume: number; holders: number } | null;
+  // Ducked for clips playing over the music. We always restore to the kiosk's own
+  // music volume setting, never to a value read back from Spotify (a stale read
+  // could capture the ducked level and leave the music quiet).
+  duck: { holders: number; since: number } | null;
+  // When we last changed the volume; device reports lag behind, so don't sync the
+  // music-volume setting from the device right after our own change.
+  volumeSetAt: number;
   pausedForInstant: { holders: number } | null;
   // What Spotify will play after the current track (playlist order, shuffle and
   // repeat included), minus our own handed-off track. Shown under Up Next.
@@ -42,6 +51,7 @@ function freshState(): EngineState {
     error: null,
     audioHost: null,
     duck: null,
+    volumeSetAt: 0,
     pausedForInstant: null,
     upcoming: [],
     upcomingAt: 0,
@@ -124,6 +134,8 @@ async function tick() {
       }
 
       if (s.memory.clip && Date.now() - s.memory.clip.startedAt > CLIP_TIMEOUT_MS) await finishClip(s.memory.clip.id);
+
+      await volumeHousekeeping();
 
       const uri = pb?.item?.uri ?? null;
       if (s.upcomingStale || uri !== s.upcomingForUri || Date.now() - s.upcomingAt > UPCOMING_REFRESH_MS)
@@ -278,19 +290,73 @@ export async function instantResume() {
   poke();
 }
 
+// ---- Volume ---------------------------------------------------------------
+
+async function applyVolume(percent: number) {
+  const s = state();
+  s.volumeSetAt = Date.now();
+  await api("PUT", "/me/player/volume", undefined, { volume_percent: String(Math.round(percent)) });
+}
+
+function duckedLevel(base: number) {
+  return Math.round((base * getSettings().duckPercent) / 100);
+}
+
+// The music volume the kiosk restores to; seeded from the device the first time.
+function musicVolume(): number {
+  const { musicVolume } = getSettings();
+  if (musicVolume != null) return musicVolume;
+  const v = state().playback?.device?.volume_percent ?? 70;
+  updateSettings({ musicVolume: v });
+  return v;
+}
+
+// Manual music volume (the slider). While ducked, the new level applies after
+// the clip; the ducked level follows it right away.
+export async function setMusicVolume(percent: number) {
+  const s = state();
+  const v = Math.max(0, Math.min(100, Math.round(percent)));
+  updateSettings({ musicVolume: v });
+  await applyVolume(s.duck ? duckedLevel(v) : v);
+}
+
+// Keep the setting in step with volume changes made elsewhere (Spotify app, the
+// device's own buttons), and make sure a duck can't get stuck on.
+async function volumeHousekeeping() {
+  const s = state();
+  const dev = s.playback?.device;
+  if (!dev?.supports_volume || dev.volume_percent == null) return;
+  if (s.duck && Date.now() - s.duck.since > DUCK_WATCHDOG_MS) {
+    logError("engine", "duck left on too long — restoring the music volume");
+    s.duck = null;
+    await applyVolume(musicVolume());
+    return;
+  }
+  if (!s.duck && Date.now() - s.volumeSetAt > VOLUME_SYNC_QUIET_MS && dev.volume_percent !== musicVolume())
+    updateSettings({ musicVolume: dev.volume_percent });
+}
+
 // Duck: lower Spotify's volume if the device allows it. Returns "volume" when
 // ducked via the API, or "unsupported" so the browser can try iOS audio-session
 // ducking or fall back to pausing.
-export async function duck(percent: number): Promise<"volume" | "unsupported"> {
+export async function duck(): Promise<"volume" | "unsupported"> {
   const s = state();
   if (s.duck) {
     s.duck.holders++;
     return "volume";
   }
   const dev = s.playback?.device;
-  if (!dev?.supports_volume || dev.volume_percent == null) return "unsupported";
-  await api("PUT", "/me/player/volume", undefined, { volume_percent: String(Math.round(percent)) });
-  s.duck = { previousVolume: dev.volume_percent, holders: 1 };
+  if (!dev?.supports_volume) return "unsupported";
+  const base = musicVolume();
+  // Record the duck before the call, so a failure after Spotify acted still restores.
+  s.duck = { holders: 1, since: Date.now() };
+  try {
+    await applyVolume(duckedLevel(base));
+  } catch (e) {
+    s.duck = null;
+    await applyVolume(base).catch(() => {});
+    throw e;
+  }
   return "volume";
 }
 
@@ -298,9 +364,22 @@ export async function unduck() {
   const s = state();
   if (!s.duck) return;
   if (--s.duck.holders > 0) return;
-  const vol = s.duck.previousVolume;
   s.duck = null;
-  await api("PUT", "/me/player/volume", undefined, { volume_percent: String(vol) }).catch(() => {});
+  await restoreVolume();
+}
+
+// Force the music back to its normal volume (also the "Restore" button).
+export async function restoreVolume() {
+  const s = state();
+  s.duck = null;
+  const base = musicVolume();
+  try {
+    await applyVolume(base);
+  } catch (e) {
+    logError("engine", e, "restoring music volume — retrying");
+    await new Promise((r) => setTimeout(r, 700));
+    await applyVolume(base).catch((e2) => logError("engine", e2, "restoring music volume failed twice"));
+  }
 }
 
 // Snapshot for the UI.
@@ -322,6 +401,7 @@ export function snapshot() {
       : null,
     nowPlayingItem: s.memory.nowPlayingId ? getItem(s.memory.nowPlayingId) : null,
     ducked: Boolean(s.duck),
+    musicVolume: getSettings().musicVolume ?? pb?.device?.volume_percent ?? null,
     upcoming: s.upcoming,
     errors: recentErrors().slice(0, 15),
   };

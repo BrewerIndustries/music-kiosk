@@ -1,13 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { api } from "@/lib/spotify";
-import { duck, instantPause, instantResume, poke, skipToUpcoming, unduck } from "@/lib/engine";
+import { duck, instantPause, instantResume, poke, restoreVolume, setMusicVolume, skipToUpcoming, unduck } from "@/lib/engine";
 import { getSettings } from "@/lib/settings";
 import { adminRoute } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
 // POST /api/player { action, ... } — transport controls + clip helpers.
-//   play | pause | next | previous | volume {percent} | shuffle {on}
+//   play | pause | next | previous | volume {percent} | restoreVolume | shuffle {on}
 //   transfer {deviceId, play?} | startPlaylist {deviceId?}
 //   skipTo {uri, index}   (jump to a track in the upcoming playlist list)
 //   duck | unduck | instantPause | instantResume   (used around instant clips)
@@ -29,8 +29,11 @@ export function POST(req: NextRequest) {
       case "previous":
         await api("POST", "/me/player/previous");
         break;
-      case "volume":
-        await api("PUT", "/me/player/volume", undefined, { volume_percent: String(Math.round(Number(b.percent))) });
+      case "volume": // the music volume slider; also what ducking restores to
+        await setMusicVolume(Number(b.percent));
+        break;
+      case "restoreVolume":
+        await restoreVolume();
         break;
       case "shuffle":
         await api("PUT", "/me/player/shuffle", undefined, { state: b.on ? "true" : "false" });
@@ -53,7 +56,7 @@ export function POST(req: NextRequest) {
         await skipToUpcoming(b.uri, Math.max(0, Number(b.index) || 0));
         break;
       case "duck":
-        result = { method: await duck(getSettings().duckPercent) };
+        result = { method: await duck() };
         break;
       case "unduck":
         await unduck();

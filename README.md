@@ -33,6 +33,14 @@ It's a responsive web app: every feature works on a **laptop, iPad, or phone**. 
   - *Play over* — duck Spotify's volume via the API when the device supports it
     (browser player, desktop app); on iOS set `navigator.audioSession.type =
     "transient"` so iOS lowers the Spotify app; otherwise fall back to pause.
+- **Volume:** the Now Playing card has 🎵 Music and 🔊 Sounds sliders. The music
+  slider sets the kiosk's stored music volume, and ducking always restores to that
+  value (never a level read back from Spotify, which can be stale). The setting
+  follows changes made elsewhere (Spotify app, device buttons). Ducking lowers the
+  music to *Settings ▸ duck %* of it; failed restores retry, and a watchdog
+  restores after 3 min if a duck is ever left on. Clip volume is browser-side
+  (iOS ignores it, so clips follow the device buttons there).
+- **Errors** from routes and the engine go to the server log and *Settings ▸ Recent errors*.
 - **Soundboard** stays the source of record for clips. The kiosk reads its open
   `/api/boards` and proxies `/api/audio/<key>` (`SOUNDBOARD_URL`).
 - **Guests:** `/request?code=XXXX` (QR on the Guests tab). Server-side search, 3

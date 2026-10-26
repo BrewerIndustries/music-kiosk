@@ -2,6 +2,7 @@
 import { useEffect, useState } from "react";
 import { call, fmtTime } from "@/lib/client";
 import { PlaylistPicker } from "./PlaylistPicker";
+import { VolumeControls } from "./VolumeControls";
 import type { KioskState, Notify, SpDevice } from "./types";
 
 type Props = {
@@ -108,21 +109,7 @@ export function NowPlaying({ state, notify, sdkDeviceId }: Props) {
         <button className="btn-round" aria-label="Next" onClick={() => act("next")}>⏭</button>
       </div>
 
-      {pb?.device?.supports_volume && pb.device.volume_percent != null && !state.ducked && (
-        <label className="mt-3 flex items-center gap-2 text-sm text-muted">
-          🔈
-          <input
-            type="range"
-            min={0}
-            max={100}
-            defaultValue={pb.device.volume_percent}
-            key={pb.device.id ?? "vol"}
-            onChange={(e) => act("volume", { percent: Number(e.target.value) })}
-            className="flex-1 accent-[var(--accent)]"
-          />
-          🔊
-        </label>
-      )}
+      <VolumeControls state={state} notify={notify} />
 
       <div className="mt-3 flex flex-wrap items-center gap-2 text-sm">
         <button

@@ -16,7 +16,7 @@ export function SettingsPanel({
   onClaimAudio: () => void;
 }) {
   const s = state.settings;
-  const [duck, setDuck] = useState(s?.duckPercent ?? 20);
+  const [duck, setDuck] = useState(s?.duckPercent ?? 30);
   const [guestBase, setGuestBase] = useState(s?.guestBaseUrl ?? "");
 
   const save = (p: Record<string, unknown>) =>
@@ -40,11 +40,13 @@ export function SettingsPanel({
       <section className="card space-y-4 p-4 text-sm">
         <h2 className="section-title">Sounds</h2>
         <label className="block">
-          Music volume while a clip plays over it: <span className="font-semibold">{duck}%</span>
+          When a sound plays over the music, lower the music to{" "}
+          <span className="font-semibold">{duck}%</span> of its volume
           <input
             type="range"
             min={0}
-            max={80}
+            max={90}
+            step={5}
             value={duck}
             onChange={(e) => setDuck(Number(e.target.value))}
             onPointerUp={() => save({ duckPercent: duck })}
@@ -52,8 +54,8 @@ export function SettingsPanel({
             className="mt-2 w-full accent-[var(--accent)]"
           />
           <span className="text-xs text-muted">
-            Used when the player allows volume control (this browser, the Spotify desktop app). On iPad/iPhone,
-            iOS lowers the music itself.
+            It comes back up automatically when the sound ends. Works when the player allows volume control (this
+            browser, the Spotify desktop app); on iPad/iPhone, iOS lowers the music itself.
           </span>
         </label>
         <div className="flex items-center justify-between gap-4">
