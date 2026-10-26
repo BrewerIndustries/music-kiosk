@@ -3,7 +3,7 @@
 // and goes to the one Kiosk Durable Object, which owns all state (SQLite) and runs
 // the playback engine on alarms — so it keeps feeding Spotify even with no kiosk
 // page open, and a single object means no two requests ever race on the queue.
-import { DurableObject } from "cloudflare:workers";
+import { DurableObject, WorkerEntrypoint } from "cloudflare:workers";
 import { attachStorage } from "@/lib/db";
 import { bootstrap } from "@/lib/accounts";
 import { ensureEngine, runTick, attachAlarms } from "@/lib/engine";
@@ -16,6 +16,16 @@ export interface Env {
   ASSETS: Fetcher;
   SOUNDBOARD?: Fetcher;
   EMAIL?: { send: (msg: unknown) => Promise<unknown> };
+  MAILER?: { send: (msg: unknown) => Promise<void> };
+}
+
+// Email goes out from the Worker: a Durable Object's own send_email binding only
+// reaches verified Email Routing addresses. Reachable only over the MAILER binding.
+export class Mailer extends WorkerEntrypoint<Env> {
+  async send(msg: unknown) {
+    if (!this.env.EMAIL) throw new Error("no EMAIL binding");
+    await this.env.EMAIL.send(msg);
+  }
 }
 
 export class KioskObject extends DurableObject<Env> {
@@ -23,7 +33,7 @@ export class KioskObject extends DurableObject<Env> {
     super(ctx, env);
     attachStorage(ctx.storage);
     bootstrap();
-    attachMailer(env.EMAIL as Parameters<typeof attachMailer>[0]);
+    attachMailer((env.MAILER ?? env.EMAIL) as Parameters<typeof attachMailer>[0]);
     attachSoundboard(env.SOUNDBOARD, process.env.SOUNDBOARD_TOKEN);
     attachAlarms((at) => void ctx.storage.setAlarm(at));
   }

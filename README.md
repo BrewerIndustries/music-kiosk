@@ -32,9 +32,11 @@ It's a responsive web app: every feature works on a **laptop, iPad, or phone**. 
 - Soundboard calls go over a **service binding** (`SOUNDBOARD`) with a bearer token
   (`SOUNDBOARD_TOKEN` = the Soundboard's `JARVIS_TOKEN`).
 - Emails (invite / reset) use the `send_email` binding `EMAIL` from
-  `noreply@dabrewer.dev`. Needs Workers Paid + `wrangler email sending enable
-  dabrewer.dev`; until then sending fails soft and the invite link is shown to the
-  admin to copy.
+  `noreply@dabrewer.dev` (Email Sending enabled for dabrewer.dev 2026-10-26). They are
+  sent by the Worker's `Mailer` RPC entrypoint, which the Durable Object calls over
+  the `MAILER` self-binding: from inside a DO the binding only reaches verified Email
+  Routing addresses ("destination address is not a verified address"). Sending fails
+  soft: the link is logged and the invite link is shown to the admin to copy.
 
 ## How it works
 

@@ -6,8 +6,10 @@
   // Secrets (per env, `wrangler secret put <NAME> [--env dev]`):
   //   SPOTIFY_CLIENT_ID, SPOTIFY_CLIENT_SECRET, SESSION_SECRET, SOUNDBOARD_TOKEN
   //   (SOUNDBOARD_TOKEN = that Soundboard env's JARVIS_TOKEN)
-  // Email: `send_email` binding EMAIL (Cloudflare Email Sending, noreply@dabrewer.dev);
-  //   sends fail soft (link logged + shown to admins) until the domain is onboarded.
+  // Email: `send_email` binding EMAIL (Cloudflare Email Sending, noreply@dabrewer.dev).
+  //   Sent by the Worker, not the Durable Object (a DO's send_email binding only
+  //   reaches verified Email Routing addresses): the DO calls the Worker's `Mailer`
+  //   RPC entrypoint over the MAILER self-binding. Fails soft (link logged + shown).
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "musickiosk",
   "main": "src/server/worker.ts",
@@ -28,7 +30,10 @@
     "SOUNDBOARD_URL": "https://soundboard.dabrewer.dev",
     "BOOTSTRAP_ADMIN_EMAIL": "myemailisdanmail@gmail.com"
   },
-  "services": [{ "binding": "SOUNDBOARD", "service": "soundboard" }],
+  "services": [
+    { "binding": "SOUNDBOARD", "service": "soundboard" },
+    { "binding": "MAILER", "service": "musickiosk", "entrypoint": "Mailer" }
+  ],
   "send_email": [{ "name": "EMAIL" }],
 
   "env": {
@@ -43,7 +48,10 @@
         "SOUNDBOARD_URL": "https://soundboard-dev.dabrewer.dev",
         "BOOTSTRAP_ADMIN_EMAIL": "myemailisdanmail@gmail.com"
       },
-      "services": [{ "binding": "SOUNDBOARD", "service": "soundboard-dev" }],
+      "services": [
+        { "binding": "SOUNDBOARD", "service": "soundboard-dev" },
+        { "binding": "MAILER", "service": "musickiosk-dev", "entrypoint": "Mailer" }
+      ],
       "send_email": [{ "name": "EMAIL" }]
     }
   }
