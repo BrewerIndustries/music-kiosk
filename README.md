@@ -142,7 +142,11 @@ It's a responsive web app: every feature works on a **laptop, iPad, or phone**. 
   a run of YouTube songs plays back to back, then Spotify resumes. ⏭ skips the
   YouTube song (instantly on the kiosk screen); Spotify's ▶ ends it and goes back to
   Spotify. A YouTube song started with ▶ Now mid-song resumes the interrupted Spotify
-  song afterwards (`memory.clip.resume`) instead of skipping it. Volume follows the
+  song afterwards (`memory.clip.resume`) instead of skipping it. On the kiosk screen
+  the progress bar seeks (drag, or ←/→ 10 s). Spotify's player goes idle while a
+  YouTube run plays, so handing back first wakes it (`wakeSpotify()`: transfer to the
+  last-seen device, kept as setting `last_device`) and every queue/next/play call
+  names that `device_id` — otherwise Spotify answers "no active device". Volume follows the
   music volume; Pause & play / Play over sounds hold the YouTube song like Spotify.
   If the browser blocks autoplay (iOS), the player shows *Tap to play*. Videos that
   can't be embedded are filtered out. Guests stay Spotify-only but see YouTube songs

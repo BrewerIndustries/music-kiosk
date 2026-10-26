@@ -7,6 +7,7 @@ import { call, fmtTime } from "@/lib/client";
 import {
   attachYouTubeHost,
   playYouTube,
+  seekYouTube,
   setYouTubeVolume,
   skipYouTube,
   subscribeYouTube,
@@ -59,7 +60,16 @@ export function YouTubeStage({ state, notify }: { state: KioskState; notify: Not
   }, [now, host]);
   const durationMs = (host && yt.durationMs) || now?.durationMs || 0;
   const positionMs = host ? yt.positionMs : now ? Math.max(0, tick - now.startedAt) : 0;
-  const pct = durationMs ? Math.min(100, (positionMs / durationMs) * 100) : 0;
+  // Seeking (kiosk screen only, where the player is): drag the bar or ←/→ 10 s.
+  const [scrub, setScrub] = useState<number | null>(null);
+  const barRef = useRef<HTMLDivElement>(null);
+  const canSeek = host && Boolean(yt.videoId) && durationMs > 0;
+  const posAt = (clientX: number) => {
+    const r = barRef.current!.getBoundingClientRect();
+    return Math.round(Math.min(1, Math.max(0, (clientX - r.left) / r.width)) * durationMs);
+  };
+  const shownMs = scrub ?? positionMs;
+  const pct = durationMs ? Math.min(100, (shownMs / durationMs) * 100) : 0;
 
   // On the kiosk screen, stop the video at once; ending it reports the song done
   // (the same path as a song finishing). Elsewhere, ask the server to skip it.
@@ -99,11 +109,47 @@ export function YouTubeStage({ state, notify }: { state: KioskState; notify: Not
               </div>
             </div>
           </div>
-          <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-line">
-            <div className="h-full bg-accent" style={{ width: `${pct}%` }} />
+          <div
+            ref={barRef}
+            role={canSeek ? "slider" : undefined}
+            aria-label="Song position"
+            aria-valuemin={0}
+            aria-valuemax={Math.round(durationMs / 1000)}
+            aria-valuenow={Math.round(shownMs / 1000)}
+            tabIndex={canSeek ? 0 : -1}
+            onPointerDown={(e) => {
+              if (!canSeek) return;
+              e.currentTarget.setPointerCapture(e.pointerId);
+              setScrub(posAt(e.clientX));
+            }}
+            onPointerMove={(e) => scrub !== null && setScrub(posAt(e.clientX))}
+            onPointerUp={(e) => {
+              if (scrub === null) return;
+              setScrub(null);
+              seekYouTube(posAt(e.clientX));
+            }}
+            onPointerCancel={() => setScrub(null)}
+            onKeyDown={(e) => {
+              const step = e.key === "ArrowRight" ? 10_000 : e.key === "ArrowLeft" ? -10_000 : 0;
+              if (!step || !canSeek) return;
+              seekYouTube(Math.min(durationMs, Math.max(0, positionMs + step)));
+            }}
+            className={`group relative mt-2 flex h-6 items-center ${canSeek ? "cursor-pointer touch-none" : ""}`}
+          >
+            <div className="h-1.5 w-full overflow-hidden rounded-full bg-line">
+              <div className="h-full bg-accent" style={{ width: `${pct}%` }} />
+            </div>
+            {canSeek && (
+              <div
+                className={`absolute top-1/2 h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full bg-[var(--gold)] shadow transition-transform ${
+                  scrub !== null ? "scale-125" : "scale-75 group-hover:scale-100"
+                }`}
+                style={{ left: `${pct}%` }}
+              />
+            )}
           </div>
           <div className="mt-1 flex justify-between text-xs text-muted">
-            <span>{fmtTime(positionMs)}</span>
+            <span>{fmtTime(shownMs)}</span>
             <span>{fmtTime(durationMs)}</span>
           </div>
           <div className="mt-2 flex items-center justify-center gap-2">

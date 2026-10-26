@@ -114,6 +114,7 @@ export function ensureEngine() {
 const HOLD_DUCK = "hold_duck";
 const HOLD_PAUSED = "hold_paused";
 const HOLD_TRANSITION = "hold_transition"; // music volume lowered for a song transition
+const LAST_DEVICE = "last_device"; // the Spotify player last seen (to wake it again)
 
 function recoverAfterRestart() {
   const s = state();
@@ -392,6 +393,9 @@ async function tickBody() {
     } else {
       s.playback = await getPlayback();
       s.playbackAt = Date.now();
+      // The player to wake if Spotify drops it while it waits (wakeSpotify).
+      const devId = s.playback?.device?.id;
+      if (devId && devId !== getSetting(LAST_DEVICE)) setSetting(LAST_DEVICE, devId);
       s.error = null;
       // Only remember *playing* moments: when a browser player dies (its tab reloaded),
       // Spotify reports the song as paused on the dead device, which must not read as
@@ -475,12 +479,12 @@ g._kioskTick = tick;
 // duplicate send means the song plays twice: mark it handed off FIRST, and only undo
 // that when Spotify definitely refused it (4xx). On an ambiguous failure (network,
 // 5xx) assume it went through rather than risk queueing it again.
-async function handOff(id: string, uri: string) {
+async function handOff(id: string, uri: string, deviceId?: string) {
   const s = state();
   setStatus(id, "handed_off");
   s.memory = { ...s.memory, handoff: { id, uri, trackChanges: 0 } };
   try {
-    await api("POST", "/me/player/queue", undefined, { uri });
+    await api("POST", "/me/player/queue", undefined, { uri, device_id: deviceId });
   } catch (e) {
     if (e instanceof SpotifyError && e.status >= 400 && e.status < 500) {
       setStatus(id, "queued");
@@ -538,6 +542,39 @@ async function startInBrowser(id: string, resume = false) {
   if (!hostAlive()) await finishClip(id); // nobody to play it: skip it
 }
 
+// Spotify drops a player that sits paused for a few minutes (e.g. through a run of
+// YouTube songs), and then every command fails with "no active device". Before
+// handing back to Spotify: if nothing is active, re-attach the last player (paused,
+// keeping its place); if Spotify has forgotten the session, rebuild it from the
+// saved resume point. Returns the player to address commands to.
+async function wakeSpotify(): Promise<string | undefined> {
+  const pb = await getPlayback().catch(() => null);
+  if (pb?.device?.is_active && pb.device.id) return pb.device.id;
+  let id = pb?.device?.id ?? getSetting(LAST_DEVICE) ?? undefined;
+  if (!id) {
+    const { devices } = (await api<{ devices: { id: string | null; name: string }[] }>("GET", "/me/player/devices").catch(
+      () => null,
+    )) ?? { devices: [] };
+    id = devices.find((d) => d.id && d.name.startsWith("Music Kiosk"))?.id ?? devices.find((d) => d.id)?.id ?? undefined;
+  }
+  if (!id) return undefined;
+  try {
+    await api("PUT", "/me/player", { device_ids: [id], play: false });
+    await new Promise((r) => setTimeout(r, 700));
+    if ((await getPlayback().catch(() => null))?.item) return id;
+  } catch (e) {
+    logError("engine", e, "waking Spotify after YouTube/clip");
+  }
+  const point = resumePoint();
+  if (point) {
+    const body = point.contextUri
+      ? { context_uri: point.contextUri, offset: { uri: point.uri }, position_ms: point.progressMs }
+      : { uris: [point.uri], position_ms: point.progressMs };
+    await api("PUT", "/me/player/play", body, { device_id: id }).catch((e) => logError("engine", e, "rebuilding Spotify session"));
+  }
+  return id;
+}
+
 // The browser finished (or skipped) a queued clip / YouTube song: move on.
 export async function finishClip(id: string) {
   const s = state();
@@ -548,7 +585,8 @@ export async function finishClip(id: string) {
   // It cut into a Spotify song (▶ Now): carry on with that song; the rest of Up
   // Next follows it as usual.
   if (resume) {
-    await api("PUT", "/me/player/play").catch(() => {});
+    const dev = await wakeSpotify();
+    await api("PUT", "/me/player/play", undefined, { device_id: dev }).catch(() => {});
     poke();
     return;
   }
@@ -562,10 +600,11 @@ export async function finishClip(id: string) {
   }
   // If a track is next in Up Next, hand it off before skipping so it plays now;
   // otherwise skipping resumes the playlist.
+  const dev = await wakeSpotify();
   const h = head();
-  if (h?.kind === "track" && h.uri) await handOff(h.id, h.uri);
-  await api("POST", "/me/player/next");
-  await api("PUT", "/me/player/play").catch(() => {}); // some devices stay paused after next
+  if (h?.kind === "track" && h.uri) await handOff(h.id, h.uri, dev);
+  await api("POST", "/me/player/next", undefined, { device_id: dev });
+  await api("PUT", "/me/player/play", undefined, { device_id: dev }).catch(() => {}); // some devices stay paused after next
   poke();
 }
 

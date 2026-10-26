@@ -14,6 +14,7 @@ type YTPlayer = {
   stopVideo(): void;
   setVolume(v: number): void;
   getPlayerState(): number;
+  seekTo(seconds: number, allowSeekAhead: boolean): void;
   getCurrentTime(): number;
   getDuration(): number;
   destroy(): void;
@@ -175,6 +176,13 @@ export function playYouTube(videoId: string): Promise<void> {
       }, 1000);
     });
   });
+}
+
+// Jump to a point in the song (from the progress bar).
+export function seekYouTube(ms: number) {
+  if (!player || !current) return;
+  player.seekTo(Math.max(0, ms) / 1000, true);
+  emit({ positionMs: Math.max(0, ms) });
 }
 
 export function tapToPlay() {
