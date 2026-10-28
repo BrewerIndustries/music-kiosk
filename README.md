@@ -143,8 +143,14 @@ It's a responsive web app: every feature works on a **laptop, iPad, or phone**. 
   YouTube's embedded IFrame player ([src/lib/youtubePlayer.ts](src/lib/youtubePlayer.ts),
   visible ≥200×200 as YouTube requires — no audio-only playback), and reports back;
   a run of YouTube songs plays back to back, then Spotify resumes. ⏭ skips the
-  YouTube song (instantly on the kiosk screen); Spotify's ▶ ends it and goes back to
-  Spotify. A YouTube song started with ▶ Now mid-song resumes the interrupted Spotify
+  YouTube song (instantly on the kiosk screen). **One player at a time:** anything
+  that starts Spotify during a YouTube song (▶, fade in, the Resume banner, ⏮,
+  playlist start/skip-to, a transfer) calls `holdYouTube()`. The kiosk tab sees
+  `youtubeHeld` and pauses the video, and the song is marked `resume`, so when it
+  finishes Spotify carries on with its current song. Whenever the video starts
+  playing (our ▶, *Tap to play*, or YouTube's own controls) the kiosk tab posts
+  `youtubePlay`, which pauses Spotify. The "music stopped" banner (`resumeOffer`)
+  stays hidden while a YouTube song or clip is in progress, even when it's paused. A YouTube song started with ▶ Now mid-song resumes the interrupted Spotify
   song afterwards (`memory.clip.resume`) instead of skipping it. On the kiosk screen
   the progress bar seeks (drag, or ←/→ 10 s). Spotify's player goes idle while a
   YouTube run plays, so handing back first wakes it (`wakeSpotify()`: transfer to the

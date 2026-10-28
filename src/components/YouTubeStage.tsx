@@ -6,6 +6,7 @@ import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { call, fmtTime } from "@/lib/client";
 import {
   attachYouTubeHost,
+  pauseYouTube,
   playYouTube,
   seekYouTube,
   setYouTubeVolume,
@@ -50,6 +51,21 @@ export function YouTubeStage({ state, notify }: { state: KioskState; notify: Not
   useEffect(() => {
     if (yt.videoId && yt.videoId !== playingId && !state.clip) skipYouTube();
   }, [yt.videoId, playingId, state.clip]);
+
+  // One player at a time. Spotify was started over this song (▶, fade in,
+  // Resume…): pause the video here. And whenever the video starts playing — our
+  // ▶, the tap prompt, or YouTube's own controls — tell the server so it pauses
+  // Spotify if anything got it going.
+  const held = host && Boolean(state.youtubeHeld);
+  useEffect(() => {
+    if (held) pauseYouTube();
+  }, [held]);
+  const wasPlaying = useRef(false);
+  useEffect(() => {
+    const started = yt.playing && !wasPlaying.current;
+    wasPlaying.current = yt.playing;
+    if (host && started) call("POST", "/api/player", { action: "youtubePlay" }).catch((e) => notify(e.message));
+  }, [host, yt.playing, notify]);
 
   // Elapsed time: the player's own on the host, else estimated from the start.
   const [tick, setTick] = useState(() => Date.now());
@@ -162,7 +178,11 @@ export function YouTubeStage({ state, notify }: { state: KioskState; notify: Not
               ⏭ Skip
             </button>
           </div>
-          <p className="mt-2 text-center text-xs text-muted">Spotify is paused and picks up after the YouTube songs.</p>
+          <p className="mt-2 text-center text-xs text-muted">
+            {state.youtubeHeld
+              ? "Paused while Spotify plays. ▶ here switches back (and pauses Spotify)."
+              : "Spotify is paused and picks up after the YouTube songs."}
+          </p>
         </div>
       )}
     </section>

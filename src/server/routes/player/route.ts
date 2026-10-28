@@ -3,6 +3,9 @@ import { api } from "@/lib/spotify";
 import {
   duck,
   fadeMusic,
+  holdYouTube,
+  wakeSpotify,
+  youtubeResumed,
   markStopped,
   keepPosition,
   placeBeforeMove,
@@ -28,6 +31,7 @@ export const dynamic = "force-dynamic";
 // POST /api/player { action, ... } — transport controls + clip helpers.
 //   play | pause | next | previous | volume {percent} | restoreVolume | shuffle {on}
 //   transfer {deviceId, play?, browser?} | startPlaylist {deviceId?, paused?}
+//   youtubePlay (the YouTube song's ▶: pauses Spotify)
 //   fadeIn | fadeOut {cueNext?}  (music; cueNext leaves the next song paused)  ·  resumeOn {deviceId?}  ·  releaseHolds
 //   skipTo {uri, index, paused?}   (jump to a track in the upcoming playlist list;
 //                                   paused cues it up without playing)
@@ -37,11 +41,23 @@ export function POST(req: NextRequest) {
     const b = (await req.json()) as Record<string, unknown>;
     const deviceId = typeof b.deviceId === "string" ? b.deviceId : undefined;
     let result: Record<string, unknown> = { ok: true };
+    // One player at a time: anything that starts Spotify during a YouTube song
+    // pauses the video on the kiosk screen (it plays on when its own ▶ is pressed).
+    const startsSpotify =
+      ["play", "previous", "fadeIn", "resumeOn"].includes(b.action as string) ||
+      (["startPlaylist", "skipTo"].includes(b.action as string) && b.paused !== true) ||
+      (b.action === "transfer" && b.play !== false);
+    const duringYouTube = Boolean(snapshot().youtubeNow);
+    if (startsSpotify && duringYouTube) holdYouTube();
     switch (b.action) {
-      case "play":
-        // Spotify's ▶ during a YouTube song means "back to Spotify": end the YouTube song.
-        if (snapshot().youtubeNow) await skipCurrent();
-        else await api("PUT", "/me/player/play", undefined, { device_id: deviceId });
+      case "play": {
+        // Spotify sits idle through a YouTube song and may have dropped its player.
+        const dev = deviceId ?? (duringYouTube ? await wakeSpotify() : undefined);
+        await api("PUT", "/me/player/play", undefined, { device_id: dev });
+        break;
+      }
+      case "youtubePlay": // the YouTube song's ▶ on the kiosk screen: Spotify steps aside
+        await youtubeResumed();
         break;
       case "pause":
         await api("PUT", "/me/player/pause");

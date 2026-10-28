@@ -194,6 +194,10 @@ export function toggleYouTube() {
   else player.playVideo();
 }
 export const skipYouTube = () => current && finish();
+// Spotify took the floor (see engine holdYouTube): pause, keep our place.
+export function pauseYouTube() {
+  if (player && current && status.playing) player.pauseVideo();
+}
 
 // For clipPlayer: hold the YouTube song while an instant clip plays, if one is
 // playing here. Returns null when there's nothing to hold (the clip then holds
