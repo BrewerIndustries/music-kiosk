@@ -109,7 +109,9 @@ It's a responsive web app: every feature works on a **laptop, iPad, or phone**. 
 - **After "Play now"** (a replay from the history, or any song) the music goes on
   with Up Next, then back to the playlist song that was due next (`returnTo`,
   captured by `rememberPlace()`), not whatever followed the replayed song in the
-  playlist. ⏭ also plays the top of Up Next first (Spotify's own next only knows
+  playlist. The engine makes that jump in the last ~1.5 s of the last Up Next
+  song, so the wrong song never starts (`backToPlace()` catches it if a poll
+  misses). ⏭ also plays the top of Up Next first (Spotify's own next only knows
   the playlist), then that remembered place. Starting a playlist, skipping to a
   "Then from…" song or ⏮ forgets it.
 - **Up Next rows:** ▶ play now, ⇈ move to the top (`PATCH {action:"top"}`), ↑ / ↓
