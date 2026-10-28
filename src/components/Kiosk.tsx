@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { call, KIOSK_CHANGED } from "@/lib/client";
 import { playQueuedClip, setClipVolume, unlockAudio } from "@/lib/clipPlayer";
 import { YouTubeStage } from "./YouTubeStage";
+import { HealthLight } from "./HealthLight";
 import { youtubeStatus } from "@/lib/youtubePlayer";
 import { useSpotifyPlayer } from "./useSpotifyPlayer";
 import { NowPlaying } from "./NowPlaying";
@@ -271,7 +272,10 @@ export function Kiosk({ envLabel }: { envLabel: string | null }) {
       )}
 
       <header className="flex items-center justify-between px-4 pt-4 sm:px-6">
-        <div className="festive text-2xl">🎄 Music Kiosk 🎅</div>
+        <div className="flex items-center gap-2">
+          <div className="festive text-2xl">🎄 Music Kiosk 🎅</div>
+          <HealthLight state={state} offline={offline} sdk={sdk} />
+        </div>
         <nav className="hidden gap-1 sm:flex">
           {TABS.map((t) => (
             <button

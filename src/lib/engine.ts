@@ -1056,6 +1056,8 @@ export function snapshot() {
     nowPlayingItem: s.memory.nowPlayingId ? getItem(s.memory.nowPlayingId) : null,
     // A YouTube song playing in the kiosk tab (Spotify waits paused meanwhile).
     youtubeNow: youtubeNow(),
+    // Some kiosk tab is polling as the audio host (plays clips and YouTube songs).
+    audioHostAlive: hostAlive(),
     youtubeHeld: Boolean(s.youtubeHeld && s.memory.clip?.id === s.youtubeHeld),
     ducked: Boolean(s.duck),
     // Belt and braces: never show a fade that has outlived any real fade.

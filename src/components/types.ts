@@ -23,6 +23,7 @@ export type KioskState = {
   } | null;
   nowPlayingItem?: QueueItem | null;
   youtubeNow?: (QueueItem & { startedAt: number }) | null;
+  audioHostAlive?: boolean;
   youtubeHeld?: boolean; // Spotify took over: the kiosk tab pauses the YouTube song
   ducked?: boolean;
   fading?: boolean;
