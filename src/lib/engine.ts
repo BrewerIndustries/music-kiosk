@@ -506,7 +506,27 @@ async function tickBody() {
 
       if (s.memory.clip && clipOverdue(s.memory.clip)) await finishClip(s.memory.clip.id);
 
-      if (s.returnTo && pb?.item && prevUri && pb.item.uri !== prevUri && !s.memory.clip) await backToPlace(pb);
+      // An Up Next song (e.g. a replay) is about to end with nothing else queued: jump
+      // straight to the playlist's remembered place, so Spotify never starts the song
+      // that follows it in the playlist. backToPlace() is the fallback if this misses.
+      if (
+        s.returnTo &&
+        pb?.item &&
+        pb.is_playing &&
+        s.memory.nowPlayingId &&
+        !s.memory.handoff &&
+        !s.memory.clip &&
+        !head() &&
+        pb.item.uri !== s.returnTo.uri &&
+        pb.item.duration_ms - (pb.progress_ms ?? 0) <= CLIP_CUT_MS
+      ) {
+        const back = s.returnTo;
+        s.returnTo = null;
+        await api("PUT", "/me/player/play", { context_uri: back.context, offset: { uri: back.uri } }).catch((e) =>
+          logError("engine", e, "returning to the playlist's place"),
+        );
+        s.upcomingStale = true;
+      } else if (s.returnTo && pb?.item && prevUri && pb.item.uri !== prevUri && !s.memory.clip) await backToPlace(pb);
 
       await volumeHousekeeping();
       delay = maybeTransition(delay);
