@@ -12,6 +12,7 @@ import {
   placeBeforeMove,
   instantPause,
   skipCurrent,
+  forgetPlace,
   snapshot,
   instantResume,
   poke,
@@ -73,6 +74,7 @@ export function POST(req: NextRequest) {
         await skipCurrent();
         break;
       case "previous":
+        forgetPlace();
         await api("POST", "/me/player/previous");
         break;
       case "seek": // the progress bar

@@ -13,7 +13,7 @@ export function UpNext({ state, notify }: { state: KioskState; notify: Notify })
   const remove = (id: string) => call("DELETE", `/api/queue/${id}`).catch((e) => notify(e.message));
   const history = state.history ?? [];
   // Put a song (from the history or the playlist) into Up Next: first, or playing now.
-  const enqueue = (t: TrackSummary, how: "top" | "playNow") => {
+  const enqueue = (t: TrackSummary & { requestedBy?: string | null; dedication?: string | null }, how: "top" | "playNow") => {
     const youtube = t.uri.startsWith("youtube:");
     if (how === "playNow" && !youtube) expect({ track: t, playing: true });
     return call("POST", "/api/queue", {
@@ -23,6 +23,9 @@ export function UpNext({ state, notify }: { state: KioskState; notify: Notify })
       subtitle: t.subtitle,
       art: t.art,
       durationMs: t.durationMs,
+      // A replay from Previously played keeps who asked for it and their dedication.
+      requestedBy: t.requestedBy ?? undefined,
+      dedication: t.dedication ?? undefined,
       [how]: true,
     })
       .then(() => notify(how === "playNow" ? `Playing “${t.title}”` : `“${t.title}” is up next`))
@@ -142,7 +145,7 @@ function PlaylistRow({
   onCue,
   onTop,
 }: {
-  track: TrackSummary;
+  track: TrackSummary & { requestedBy?: string | null; dedication?: string | null };
   onPlay: () => void;
   onCue?: () => void;
   onTop: () => void;
@@ -167,6 +170,12 @@ function PlaylistRow({
             {track.uri.startsWith("youtube:") && <span className="mr-1 rounded bg-red-600/80 px-1 text-[10px] font-semibold text-white">YouTube</span>}
             {track.subtitle}
           </div>
+          {(track.requestedBy || track.dedication) && (
+            <div className="truncate text-xs text-muted">
+              {track.requestedBy && <span>🎁 {track.requestedBy}</span>}
+              {track.dedication && <span className="ml-1 italic">💌 “{track.dedication}”</span>}
+            </div>
+          )}
         </div>
         <span className="shrink-0 text-xs tabular-nums text-muted">{fmtTime(track.durationMs)}</span>
       </button>

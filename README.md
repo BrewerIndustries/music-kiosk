@@ -103,7 +103,15 @@ It's a responsive web app: every feature works on a **laptop, iPad, or phone**. 
 - **Previously played** (top of the queue column, 3 rows, scrolls): every song that
   played ≥ 10 s, from any source including YouTube songs (`notePlayed()` in
   `finishClip`), kept in settings (`play_history`, last 50); ▶ plays it again now,
-  ⤒ puts it first in Up Next.
+  ⤒ puts it first in Up Next. A request keeps its 🎁 requester and 💌 dedication
+  in the history and the event log (the engine passes the playing Up Next item's
+  info to `notePlaying()` / `notePlayed()`), and a replay carries them along.
+- **After "Play now"** (a replay from the history, or any song) the music goes on
+  with Up Next, then back to the playlist song that was due next (`returnTo`,
+  captured by `rememberPlace()`), not whatever followed the replayed song in the
+  playlist. ⏭ also plays the top of Up Next first (Spotify's own next only knows
+  the playlist), then that remembered place. Starting a playlist, skipping to a
+  "Then from…" song or ⏮ forgets it.
 - **Up Next rows:** ▶ play now, ⇈ move to the top (`PATCH {action:"top"}`), ↑ / ↓
   one place, ✕ remove.
 - **Fade between songs** (*Settings ▸ Music*, off by default, up to 12 s): the engine

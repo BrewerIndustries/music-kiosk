@@ -61,6 +61,11 @@ type EngineState = {
   // is the song whose ending we've already handled.
   transitioning: boolean;
   transitionFor: string | null;
+  // Where the backdrop playlist was when "Play now" cut in (the song it would have
+  // played next). Spotify can lose its place when a song from the playlist (e.g. a
+  // replay from Previously played) is played out of turn, so once Up Next runs dry
+  // the music goes back here instead of to whatever followed the replayed song.
+  returnTo: { context: string; uri: string } | null;
 };
 
 const g = globalThis as unknown as { _kioskEngine?: EngineState; _kioskTick?: () => Promise<void> };
@@ -91,6 +96,7 @@ function freshState(): EngineState {
     fadingSince: 0,
     transitioning: false,
     transitionFor: null,
+    returnTo: null,
   };
 }
 
@@ -337,6 +343,7 @@ export async function resumeOn(deviceId?: string) {
 // playing: Spotify can only load by playing, so mute, start, pause at 0:00, and
 // put the volume back.
 export async function startPlaylist(uri: string, deviceId: string | undefined, paused: boolean) {
+  forgetPlace();
   const dev = { device_id: deviceId };
   if (paused) await api("PUT", "/me/player/volume", undefined, { volume_percent: "0", ...dev }).catch(() => {});
   try {
@@ -449,7 +456,11 @@ async function tickBody() {
       // Spotify reports the song as paused on the dead device, which must not read as
       // "someone stopped the music". Deliberate stops go through markStopped().
       if (s.playback?.item) saveResumePoint(s.playback);
-      if (s.playback?.item) notePlaying(summarize(s.playback.item), s.playback.progress_ms ?? 0);
+      if (s.playback?.item) {
+        const it = s.memory.nowPlayingId ? getItem(s.memory.nowPlayingId) : null;
+        const info = it?.uri === s.playback.item.uri ? requestInfo(it) : undefined;
+        notePlaying(summarize(s.playback.item), s.playback.progress_ms ?? 0, info);
+      }
       // A do-not-play song came up (from the playlist, or the Spotify app): skip it.
       if (s.playback?.is_playing && s.playback.item && s.skippedBlocked !== s.playback.item.uri) {
         const hit = isBlocked(summarize(s.playback.item));
@@ -462,6 +473,7 @@ async function tickBody() {
       feedBackdrop();
       const pb = s.playback;
       const h = head();
+      const prevUri = s.memory.lastUri;
       const decision = decide(
         pb?.item
           ? {
@@ -493,6 +505,8 @@ async function tickBody() {
       }
 
       if (s.memory.clip && clipOverdue(s.memory.clip)) await finishClip(s.memory.clip.id);
+
+      if (s.returnTo && pb?.item && prevUri && pb.item.uri !== prevUri && !s.memory.clip) await backToPlace(pb);
 
       await volumeHousekeeping();
       delay = maybeTransition(delay);
@@ -627,7 +641,70 @@ export async function skipCurrent() {
       return poke();
     }
   }
+  // Skip goes to the top of Up Next (Spotify's own "next" only knows the playlist),
+  // else back to where the playlist was before a "Play now".
+  const h = head();
+  if (h && !s.memory.handoff) {
+    if (h.kind === "track" && h.uri) {
+      await handOff(h.id, h.uri);
+      await api("POST", "/me/player/next");
+      return poke();
+    }
+    if (playsInBrowser(h.kind)) {
+      await api("PUT", "/me/player/pause").catch(() => {});
+      await startInBrowser(h.id);
+      return poke();
+    }
+  }
+  if (!s.memory.handoff && s.returnTo) {
+    const back = s.returnTo;
+    s.returnTo = null;
+    try {
+      await api("PUT", "/me/player/play", { context_uri: back.context, offset: { uri: back.uri } });
+      return poke();
+    } catch (e) {
+      logError("engine", e, "returning to the playlist's place");
+    }
+  }
   await api("POST", "/me/player/next");
+}
+
+// "Play now" is about to cut in: remember the playlist song that was due next.
+function rememberPlace() {
+  const s = state();
+  if (s.returnTo || kioskBackdrop()) return;
+  const ctx = s.playback?.context?.uri;
+  const next = s.upcoming[0]?.uri;
+  if (ctx?.startsWith("spotify:playlist:") && next && s.upcomingForUri === (s.playback?.item?.uri ?? null))
+    s.returnTo = { context: ctx, uri: next };
+}
+
+// The song changed while a place is remembered. An Up Next song (or the remembered
+// song itself) is fine; anything else means Spotify carried on from the wrong spot.
+async function backToPlace(pb: SpPlayback) {
+  const s = state();
+  const back = s.returnTo!;
+  const uri = pb.item!.uri;
+  if (uri === back.uri) {
+    s.returnTo = null;
+    return;
+  }
+  if (s.memory.nowPlayingId || s.memory.handoff) return; // Up Next is still playing out
+  // Someone picked a different playlist in the Spotify app: forget the old place.
+  if (pb.context?.uri && pb.context.uri !== back.context) {
+    s.returnTo = null;
+    return;
+  }
+  s.returnTo = null;
+  await api("PUT", "/me/player/play", { context_uri: back.context, offset: { uri: back.uri } }).catch((e) =>
+    logError("engine", e, "returning to the playlist's place"),
+  );
+  s.upcomingStale = true;
+}
+
+// A deliberate jump (another playlist, a song from "Then from…", ⏮): the old place no longer applies.
+export function forgetPlace() {
+  state().returnTo = null;
 }
 
 // A browser-played item that never reported back (tab closed, player stuck).
@@ -715,6 +792,7 @@ export async function finishClip(id: string) {
         { uri: item.uri, title: item.title, subtitle: item.subtitle, art: item.art, durationMs: item.durationMs, explicit: false },
         heard,
         s.memory.clip.startedAt,
+        requestInfo(item),
       );
   }
   setSetting(YT_CLIP, null);
@@ -774,6 +852,7 @@ export async function playNow(id: string) {
     poke();
     return;
   }
+  rememberPlace();
   // A Spotify song over a YouTube song / clip: that one is over. Spotify has been
   // sitting paused (maybe dropped its player), so play this song directly.
   if (dropBrowserItem()) {
@@ -805,6 +884,7 @@ export async function playNow(id: string) {
 // for the jump, paused, then put back to the music volume.
 export async function skipToUpcoming(uri: string, index: number, paused = false) {
   const s = state();
+  s.returnTo = null;
   const ctx = s.playback?.context?.uri;
   const dev = s.playback?.device;
   const deviceId = dev?.id ?? undefined;
@@ -1151,6 +1231,7 @@ async function playTrackDirect(item: QueueItem, deviceId?: string) {
 // shuffled). `paused` loads its first song without playing it.
 export async function startKioskPlaylist(playlistId: string, deviceId: string | undefined, paused: boolean) {
   const s = state();
+  s.returnTo = null;
   clearBackdropItems();
   resetCursor(playlistId);
   // Whatever the kiosk tab is playing gives way.
@@ -1180,6 +1261,11 @@ export async function startKioskPlaylist(playlistId: string, deviceId: string | 
   }
   s.upcomingStale = true;
   poke();
+}
+
+// Who asked for an Up Next item, for the history and the event log.
+function requestInfo(it: QueueItem) {
+  return { requestedBy: it.requestedBy, dedication: it.dedication, source: it.source };
 }
 
 // Snapshot for the UI.

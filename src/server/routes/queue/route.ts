@@ -54,6 +54,7 @@ function parseItem(b: Record<string, unknown>): NewItem | string {
     art: str(b.art),
     durationMs: typeof b.durationMs === "number" ? b.durationMs : 0,
     requestedBy: str(b.requestedBy),
+    dedication: str(b.dedication), // e.g. a replay from Previously played keeps its dedication
   };
 }
 

@@ -9,7 +9,12 @@ const CURRENT = "play_history_current";
 const MAX = 50;
 const COUNTS_AS_PLAYED_MS = 10_000;
 
-export type PlayedTrack = TrackSummary & { playedAt: string };
+// Who asked for a song and what they said (from the Up Next item it played as).
+export type RequestInfo = { requestedBy: string | null; dedication: string | null; source: string | null };
+const NO_REQUEST: RequestInfo = { requestedBy: null, dedication: null, source: null };
+
+export type PlayedTrack = TrackSummary & { playedAt: string; requestedBy?: string | null; dedication?: string | null };
+type Current = { track: TrackSummary; maxMs: number; info?: RequestInfo };
 
 function read<T>(key: string, fallback: T): T {
   try {
@@ -24,38 +29,42 @@ export function playHistory(): PlayedTrack[] {
   return read<PlayedTrack[]>(KEY, []);
 }
 
-// Called on every engine poll with what's playing now. When the song changes, the
-// one before goes into the history if it got far enough.
-export function notePlaying(track: TrackSummary | null, progressMs: number) {
-  if (!track) return;
-  const cur = read<{ track: TrackSummary; maxMs: number } | null>(CURRENT, null);
-  if (cur?.track.uri === track.uri) {
-    if (progressMs > cur.maxMs + 5000) setSetting(CURRENT, JSON.stringify({ track, maxMs: progressMs }));
-    return;
-  }
-  if (cur && cur.maxMs >= COUNTS_AS_PLAYED_MS) {
-    logPlay(cur.track, cur.maxMs, Date.now() - cur.maxMs);
-    const list = playHistory();
-    if (list[0]?.uri !== cur.track.uri) {
-      list.unshift({ ...cur.track, playedAt: new Date().toISOString() });
-      setSetting(KEY, JSON.stringify(list.slice(0, MAX)));
-    }
-  }
-  setSetting(CURRENT, JSON.stringify({ track, maxMs: progressMs }));
-}
-
-// A song played outside Spotify (a YouTube song in the kiosk tab) finished.
-export function notePlayed(track: TrackSummary, playedMs: number, startedAt: number) {
-  logPlay(track, playedMs, startedAt);
+function addToHistory(track: TrackSummary, info: RequestInfo) {
   const list = playHistory();
   if (list[0]?.uri === track.uri) return;
-  list.unshift({ ...track, playedAt: new Date().toISOString() });
+  list.unshift({ ...track, playedAt: new Date().toISOString(), requestedBy: info.requestedBy, dedication: info.dedication });
   setSetting(KEY, JSON.stringify(list.slice(0, MAX)));
 }
 
+// Called on every engine poll with what's playing now (and, once the engine knows
+// it, the Up Next item it is playing as). When the song changes, the one before
+// goes into the history and the event log if it got far enough.
+export function notePlaying(track: TrackSummary | null, progressMs: number, info?: RequestInfo) {
+  if (!track) return;
+  const cur = read<Current | null>(CURRENT, null);
+  if (cur?.track.uri === track.uri) {
+    // The engine learns which Up Next item this is a tick after the song starts.
+    const learned = info && !cur.info;
+    if (learned || progressMs > cur.maxMs + 5000)
+      setSetting(CURRENT, JSON.stringify({ ...cur, maxMs: Math.max(cur.maxMs, progressMs), info: cur.info ?? info }));
+    return;
+  }
+  if (cur && cur.maxMs >= COUNTS_AS_PLAYED_MS) {
+    const was = cur.info ?? NO_REQUEST;
+    logPlay(cur.track, cur.maxMs, Date.now() - cur.maxMs, was);
+    addToHistory(cur.track, was);
+  }
+  setSetting(CURRENT, JSON.stringify({ track, maxMs: progressMs, info }));
+}
+
+// A song played outside Spotify (a YouTube song in the kiosk tab) finished.
+export function notePlayed(track: TrackSummary, playedMs: number, startedAt: number, info: RequestInfo = NO_REQUEST) {
+  logPlay(track, playedMs, startedAt, info);
+  addToHistory(track, info);
+}
+
 // ---- The event log (plays table): every song that played, for the event summary
-// and the keepsake playlist. Who asked for it (and their dedication) comes from the
-// Up Next item it played as, if any.
+// and the keepsake playlist, with who asked for it and their dedication.
 export type Play = {
   uri: string;
   kind: "track" | "youtube";
@@ -70,17 +79,8 @@ export type Play = {
   dedication: string | null;
 };
 
-function logPlay(t: TrackSummary, playedMs: number, startedAt: number) {
+function logPlay(t: TrackSummary, playedMs: number, startedAt: number, info: RequestInfo) {
   try {
-    const q = db()
-      .prepare(
-        `SELECT requested_by, source, dedication FROM queue
-         WHERE uri = ? AND status IN ('played','handed_off') AND created_at >= ?
-         ORDER BY created_at DESC LIMIT 1`,
-      )
-      .get(t.uri, new Date(startedAt - 6 * 60 * 60_000).toISOString()) as
-      | { requested_by: string | null; source: string | null; dedication: string | null }
-      | undefined;
     db()
       .prepare(
         `INSERT INTO plays (uri, kind, title, subtitle, art, duration_ms, played_ms, played_at, requested_by, source, dedication)
@@ -95,9 +95,9 @@ function logPlay(t: TrackSummary, playedMs: number, startedAt: number) {
         t.durationMs,
         Math.round(playedMs),
         Math.round(startedAt),
-        q?.requested_by ?? null,
-        q?.source ?? null,
-        q?.dedication ?? null,
+        info.requestedBy,
+        info.source,
+        info.dedication,
       );
   } catch (e) {
     console.error("play log", e);
@@ -123,7 +123,7 @@ export function playsBetween(from: number, to: number): Play[] {
     source: (r.source as string) ?? null,
     dedication: (r.dedication as string) ?? null,
   }));
-  const cur = read<{ track: TrackSummary; maxMs: number } | null>(CURRENT, null);
+  const cur = read<Current | null>(CURRENT, null);
   const started = cur ? Date.now() - cur.maxMs : 0;
   if (cur && cur.maxMs >= COUNTS_AS_PLAYED_MS && started >= from && started <= to && out.at(-1)?.uri !== cur.track.uri)
     out.push({
@@ -131,9 +131,7 @@ export function playsBetween(from: number, to: number): Play[] {
       kind: "track",
       playedMs: cur.maxMs,
       playedAt: started,
-      requestedBy: null,
-      source: null,
-      dedication: null,
+      ...(cur.info ?? NO_REQUEST),
     });
   return out;
 }
