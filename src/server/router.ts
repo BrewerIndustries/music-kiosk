@@ -8,6 +8,7 @@ import * as guestInfo from "./routes/guest/info/route";
 import * as guestQueue from "./routes/guest/queue/route";
 import * as guestRequest from "./routes/guest/request/route";
 import * as guestSearch from "./routes/guest/search/route";
+import * as tv from "./routes/tv/route";
 import * as importData from "./routes/import/route";
 import * as player from "./routes/player/route";
 import * as playlists from "./routes/playlists/route";
@@ -39,6 +40,7 @@ const table: [string, unknown][] = [
   ["/api/errors", errors],
   ["/api/guest/info", guestInfo],
   ["/api/guest/queue", guestQueue],
+  ["/api/tv", tv],
   ["/api/guest/request", guestRequest],
   ["/api/guest/search", guestSearch],
   ["/api/import", importData],

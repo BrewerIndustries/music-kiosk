@@ -33,6 +33,25 @@ export function GuestsPanel({ state, notify }: { state: KioskState; notify: Noti
         </div>
       </section>
 
+      <section className="card space-y-2 p-4 text-sm">
+        <h2 className="section-title">📺 TV screen</h2>
+        <p className="text-xs text-muted">
+          A big-screen “now playing” page for a TV or projector: the song, who requested it, their dedication, what&apos;s
+          next and the request QR code. Open this link in the TV&apos;s browser (it works without signing in, using the
+          party code).
+        </p>
+        {code && (
+          <>
+            <div className="break-all rounded-lg bg-bg px-3 py-2 font-mono text-xs">
+              {typeof window !== "undefined" ? location.origin : ""}/tv?code={code}
+            </div>
+            <a className="btn btn-primary inline-flex" href={`/tv?code=${code}`} target="_blank" rel="noreferrer">
+              Open TV screen ↗
+            </a>
+          </>
+        )}
+      </section>
+
       {pending.length > 0 && (
         <section className="card p-4">
           <h2 className="mb-2 text-sm font-semibold uppercase tracking-wider text-muted">Waiting for approval</h2>
