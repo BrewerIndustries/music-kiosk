@@ -4,6 +4,7 @@ import { call } from "@/lib/client";
 import { PlaylistPicker } from "./PlaylistPicker";
 import type { KioskState, Notify } from "./types";
 import { AccountSection, UsersSection } from "./Account";
+import { DoNotPlaySection } from "./DoNotPlay";
 
 export function SettingsPanel({
   state,
@@ -100,6 +101,8 @@ export function SettingsPanel({
           )}
         </div>
       </section>
+
+      <DoNotPlaySection state={state} notify={notify} />
 
       <section className="card space-y-3 p-4 text-sm">
         <h2 className="section-title">Guest link</h2>

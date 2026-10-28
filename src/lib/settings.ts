@@ -21,7 +21,36 @@ export type KioskSettings = {
   previousPartyCode: string | null; // the code before the last change, to put back printed QR codes
   guestBaseUrl: string | null; // override for the QR link (e.g. the public guest site)
   youtubeEnabled: boolean; // YouTube search/playlists on the kiosk (off = Spotify only)
+  doNotPlay: DoNotPlay[]; // songs / artists that never play (see isBlocked)
+  dedicationsOn: boolean; // guests can add a dedication, shown on the TV screen
 };
+
+// The do-not-play list: a song (by Spotify uri) or an artist (by name, matched
+// against the song's artists — Spotify's subtitle, or a YouTube channel name).
+export type DoNotPlay =
+  | { kind: "track"; uri: string; title: string; subtitle: string }
+  | { kind: "artist"; name: string };
+
+function readDoNotPlay(): DoNotPlay[] {
+  try {
+    const v = JSON.parse(getSetting("do_not_play") ?? "[]");
+    return Array.isArray(v) ? v : [];
+  } catch {
+    return [];
+  }
+}
+
+const norm = (s: string) => s.toLowerCase().replace(/\s+-\s+topic$/, "").trim();
+
+// The do-not-play entry this song hits, if any.
+export function isBlocked(t: { uri?: string | null; subtitle?: string | null }, list = readDoNotPlay()): DoNotPlay | null {
+  const artists = (t.subtitle ?? "").split(/,\s*|\s+&\s+|\s+feat\.?\s+|\s+x\s+/i).map(norm).filter(Boolean);
+  return (
+    list.find((e) =>
+      e.kind === "track" ? Boolean(t.uri) && e.uri === t.uri : artists.includes(norm(e.name)),
+    ) ?? null
+  );
+}
 
 function randomCode() {
   const letters = "ABCDEFGHJKLMNPQRSTUVWXYZ";
@@ -60,6 +89,8 @@ export function getSettings(): KioskSettings {
     previousPartyCode: getSetting("party_code_prev"),
     guestBaseUrl: getSetting("guest_base_url"),
     youtubeEnabled: getSetting("youtube_enabled") === "1",
+    doNotPlay: readDoNotPlay(),
+    dedicationsOn: getSetting("dedications_on") !== "0",
   };
 }
 
@@ -82,6 +113,24 @@ export function updateSettings(p: Record<string, unknown>) {
   if (typeof p.songTransitionMs === "number")
     setSetting("song_transition_ms", String(Math.max(0, Math.min(12_000, Math.round(p.songTransitionMs)))));
   if (typeof p.youtubeEnabled === "boolean") setSetting("youtube_enabled", p.youtubeEnabled ? "1" : "0");
+  if (typeof p.dedicationsOn === "boolean") setSetting("dedications_on", p.dedicationsOn ? "1" : "0");
+  // Do-not-play: { addDoNotPlay: entry } / { removeDoNotPlay: index }.
+  const add = p.addDoNotPlay as Record<string, unknown> | undefined;
+  if (add && typeof add === "object") {
+    const list = readDoNotPlay();
+    const str = (v: unknown, max = 200) => (typeof v === "string" ? v.trim().slice(0, max) : "");
+    let entry: DoNotPlay | null = null;
+    if (add.kind === "track" && /^spotify:track:[A-Za-z0-9]{22}$/.test(str(add.uri)))
+      entry = { kind: "track", uri: str(add.uri), title: str(add.title) || "Song", subtitle: str(add.subtitle) };
+    else if (add.kind === "artist" && str(add.name, 100)) entry = { kind: "artist", name: str(add.name, 100) };
+    const dupe = entry && list.some((e) => (e.kind === "track" && entry.kind === "track" ? e.uri === entry.uri : e.kind === "artist" && entry.kind === "artist" && norm(e.name) === norm(entry.name)));
+    if (entry && !dupe && list.length < 500) setSetting("do_not_play", JSON.stringify([...list, entry]));
+  }
+  if (typeof p.removeDoNotPlay === "number") {
+    const list = readDoNotPlay();
+    list.splice(p.removeDoNotPlay, 1);
+    setSetting("do_not_play", JSON.stringify(list));
+  }
   if (typeof p.requireApproval === "boolean") setSetting("require_approval", p.requireApproval ? "1" : "0");
   if (typeof p.guestRequestsOpen === "boolean") setSetting("guest_open", p.guestRequestsOpen ? "1" : "0");
   if (typeof p.guestBlockDuplicates === "boolean") setSetting("guest_block_dupes", p.guestBlockDuplicates ? "1" : "0");

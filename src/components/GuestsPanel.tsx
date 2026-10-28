@@ -95,6 +95,21 @@ export function GuestsPanel({ state, notify }: { state: KioskState; notify: Noti
             onChange={(e) => save({ requireApproval: e.target.checked })}
           />
         </label>
+        <label className="flex items-center justify-between gap-4">
+          <span>
+            Dedications
+            <span className="block text-xs text-muted">
+              Guests can add a short message to their song; it shows on the TV screen while the song plays. Turn on
+              “Approve requests first” to read them before they go up.
+            </span>
+          </span>
+          <input
+            type="checkbox"
+            className="h-5 w-5 accent-[var(--accent)]"
+            checked={state.settings?.dedicationsOn ?? true}
+            onChange={(e) => save({ dedicationsOn: e.target.checked })}
+          />
+        </label>
         <PartyCode state={state} save={save} />
       </section>
     </div>

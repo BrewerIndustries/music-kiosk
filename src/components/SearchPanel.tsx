@@ -117,7 +117,9 @@ function SpotifySearch({ state, notify }: { state: KioskState; notify: Notify })
                 {t.subtitle} · {fmtTime(t.durationMs)}
               </div>
             </div>
-            {queued.has(t.uri) ? (
+            {t.blocked ? (
+              <span className="text-xs text-muted" title="On the do-not-play list (Settings)">🚫 Do not play</span>
+            ) : queued.has(t.uri) ? (
               <span className="text-xs text-accent">Queued</span>
             ) : (
               <div className="flex shrink-0 gap-1">

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { isBlocked } from "@/lib/settings";
 import { addItem, clearQueue, upNext, type NewItem } from "@/lib/queue";
 import { videoIdOf } from "@/lib/youtube";
 import { playNow, poke } from "@/lib/engine";
@@ -42,6 +43,8 @@ function parseItem(b: Record<string, unknown>): NewItem | string {
   if (b.kind === "clip" && !str(b.clipKey)) return "clip needs a clipKey";
   if (b.kind === "youtube" && !videoIdOf(str(b.uri))) return "youtube needs a youtube:video: uri";
   if (b.kind !== "track" && b.kind !== "clip" && b.kind !== "youtube") return "bad kind";
+  if (b.kind !== "clip" && isBlocked({ uri: str(b.uri), subtitle: str(b.subtitle) }))
+    return `“${str(b.title) ?? "That song"}” is on the do-not-play list (Settings ▸ Do not play)`;
   return {
     kind: b.kind,
     uri: str(b.uri),

@@ -156,7 +156,10 @@ function PlaylistRow({
           <span className="absolute inset-0 hidden items-center justify-center bg-black/50 text-white group-hover:flex">▶</span>
         </div>
         <div className="min-w-0 flex-1">
-          <div className="truncate text-sm">{track.title}</div>
+          <div className={`truncate text-sm ${track.blocked ? "line-through opacity-60" : ""}`}>
+            {track.blocked && <span title="On the do-not-play list: it will be skipped">🚫 </span>}
+            {track.title}
+          </div>
           <div className="truncate text-xs text-muted">
             {track.uri.startsWith("youtube:") && <span className="mr-1 rounded bg-red-600/80 px-1 text-[10px] font-semibold text-white">YouTube</span>}
             {track.subtitle}

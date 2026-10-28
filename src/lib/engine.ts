@@ -4,7 +4,7 @@
 import { api, getPlayback, isConnected, summarize, SpotifyError, type SpPlayback, type SpTrack, type TrackSummary } from "./spotify";
 import { CLIP_CUT_MS, decide, initialMemory, type Memory } from "./engine-core";
 import { logError, recentErrors } from "./log";
-import { getSettings, updateSettings } from "./settings";
+import { getSettings, isBlocked, updateSettings } from "./settings";
 import { getItem, head, moveToFront, playsInBrowser, setStatus, upNext, type QueueItem } from "./queue";
 import { getSetting, setSetting } from "./db";
 import { notePlayed, notePlaying, playHistory } from "./history";
@@ -49,6 +49,8 @@ type EngineState = {
   upcomingStale: boolean;
   burstUntil: number;
   ticking: boolean;
+  // The do-not-play song we last skipped (skip each one once, never loop on it).
+  skippedBlocked: string | null;
   tickAgain: boolean;
   // A music fade in progress (bumping the token cancels it).
   fadeToken: number;
@@ -75,6 +77,7 @@ function freshState(): EngineState {
     volumeSetAt: 0,
     pausedForInstant: null,
     youtubeHeld: null,
+    skippedBlocked: null,
     upcoming: [],
     upcomingAt: 0,
     upcomingForUri: null,
@@ -446,6 +449,14 @@ async function tickBody() {
       // "someone stopped the music". Deliberate stops go through markStopped().
       if (s.playback?.item) saveResumePoint(s.playback);
       if (s.playback?.item) notePlaying(summarize(s.playback.item), s.playback.progress_ms ?? 0);
+      // A do-not-play song came up (from the playlist, or the Spotify app): skip it.
+      if (s.playback?.is_playing && s.playback.item && s.skippedBlocked !== s.playback.item.uri) {
+        const hit = isBlocked(summarize(s.playback.item));
+        if (hit) {
+          s.skippedBlocked = s.playback.item.uri;
+          await api("POST", "/me/player/next").catch((e) => logError("engine", e, "skipping a do-not-play song"));
+        }
+      }
 
       const pb = s.playback;
       const h = head();
@@ -1039,6 +1050,7 @@ async function cueNextPaused() {
 // Snapshot for the UI.
 export function snapshot() {
   const s = state();
+  const dnp = getSettings().doNotPlay;
   const pb = s.playback;
   return {
     error: s.error,
@@ -1066,7 +1078,7 @@ export function snapshot() {
     holdActive: holdActive(),
     resumeOffer: resumeOffer(),
     musicVolume: getSettings().musicVolume ?? pb?.device?.volume_percent ?? null,
-    upcoming: s.upcoming,
+    upcoming: s.upcoming.map((t) => (isBlocked(t, dnp) ? { ...t, blocked: true } : t)),
     history: playHistory().slice(0, 30),
     errors: recentErrors().slice(0, 15),
   };

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { clientIp, codeOk, takeGuestSlot, validGuestId } from "@/lib/guest";
 import { api, summarize, type SpTrack } from "@/lib/spotify";
 import { addItem, isQueued } from "@/lib/queue";
-import { getSettings } from "@/lib/settings";
+import { getSettings, isBlocked } from "@/lib/settings";
 import { poke } from "@/lib/engine";
 import { handle } from "@/lib/auth";
 
@@ -26,6 +26,8 @@ export function POST(req: NextRequest) {
     if (limited) return NextResponse.json({ error: limited }, { status: 429 });
     // Look the track up ourselves rather than trusting the client's title/art.
     const t = summarize((await api<SpTrack>("GET", `/tracks/${id}`))!);
+    if (isBlocked(t))
+      return NextResponse.json({ error: "Sorry — that one's on the couple's do-not-play list. Try another!" }, { status: 403 });
     const { requireApproval } = rules;
     addItem(
       {

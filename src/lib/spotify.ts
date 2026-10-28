@@ -173,6 +173,7 @@ export type TrackSummary = {
   art: string | null;
   durationMs: number;
   explicit: boolean;
+  blocked?: boolean; // on the do-not-play list (set by the kiosk search / upcoming list)
 };
 
 export function summarize(t: SpTrack): TrackSummary {

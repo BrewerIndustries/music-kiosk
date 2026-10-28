@@ -294,6 +294,22 @@ export function NowPlaying({ state, notify, sdkDeviceId }: Props) {
             ↺ Restart
           </button>
         )}
+        {pb?.track && (
+          <button
+            className="chip"
+            title="Add this song to the do-not-play list and skip it"
+            onClick={() => {
+              const t = pb.track!;
+              if (!confirm(`Never play “${t.title}” again? (Settings ▸ Do not play to undo)`)) return;
+              call("POST", "/api/settings", { addDoNotPlay: { kind: "track", uri: t.uri, title: t.title, subtitle: t.subtitle } })
+                .then(() => act("next"))
+                .then(() => notify(`Skipped — “${t.title}” won't play again`))
+                .catch((e) => notify(e.message));
+            }}
+          >
+            🚫 Never play
+          </button>
+        )}
         {pb && (
           <button className="chip" onClick={() => act("shuffle", { on: !pb.shuffle })}>
             🔀 Shuffle {pb.shuffle ? "on" : "off"}
