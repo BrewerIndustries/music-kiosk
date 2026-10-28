@@ -172,21 +172,20 @@ button:disabled { cursor: default; opacity: 0.35; }
   0%, 100% { opacity: 1; }
   50% { opacity: 0.35; box-shadow: 0 0 2px 0 var(--bulb); }
 }
+/* A little six-armed snowflake (inline SVG: arms with V branches, dot centre). */
 .xmas-flake {
   position: absolute;
-  top: -12px;
-  border-radius: 50%;
-  background: #fff;
-  box-shadow: 0 0 6px rgba(255, 255, 255, 0.8);
+  top: -24px;
+  background: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'><g transform='rotate(0 12 12)'><path d='M12 12V2.6M12 6.4 9.4 3.9M12 6.4l2.6-2.5M12 9.4l-1.7-1.6M12 9.4l1.7-1.6'/></g><g transform='rotate(60 12 12)'><path d='M12 12V2.6M12 6.4 9.4 3.9M12 6.4l2.6-2.5M12 9.4l-1.7-1.6M12 9.4l1.7-1.6'/></g><g transform='rotate(120 12 12)'><path d='M12 12V2.6M12 6.4 9.4 3.9M12 6.4l2.6-2.5M12 9.4l-1.7-1.6M12 9.4l1.7-1.6'/></g><g transform='rotate(180 12 12)'><path d='M12 12V2.6M12 6.4 9.4 3.9M12 6.4l2.6-2.5M12 9.4l-1.7-1.6M12 9.4l1.7-1.6'/></g><g transform='rotate(240 12 12)'><path d='M12 12V2.6M12 6.4 9.4 3.9M12 6.4l2.6-2.5M12 9.4l-1.7-1.6M12 9.4l1.7-1.6'/></g><g transform='rotate(300 12 12)'><path d='M12 12V2.6M12 6.4 9.4 3.9M12 6.4l2.6-2.5M12 9.4l-1.7-1.6M12 9.4l1.7-1.6'/></g><circle cx='12' cy='12' r='1.5' fill='white' stroke='none'/></svg>") center / contain no-repeat;
   animation-name: xmas-fall;
   animation-timing-function: linear;
   animation-iteration-count: infinite;
   will-change: transform;
 }
 @keyframes xmas-fall {
-  0% { transform: translate3d(0, 0, 0); }
-  50% { transform: translate3d(var(--drift), 52vh, 0); }
-  100% { transform: translate3d(0, 104vh, 0); }
+  0% { transform: translate3d(0, 0, 0) rotate(0deg); }
+  50% { transform: translate3d(var(--drift), 52vh, 0) rotate(calc(var(--spin) / 2)); }
+  100% { transform: translate3d(0, 106vh, 0) rotate(var(--spin)); }
 }
 .xmas-sparkle {
   position: absolute;

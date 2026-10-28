@@ -1,5 +1,5 @@
 // Over-the-top Christmas dressing: a twinkling string of lights along the top,
-// falling snow, and drifting gold sparkles. Pure CSS animation (transforms and
+// falling snowflakes, and drifting gold sparkles. Pure CSS animation (transforms and
 // opacity only, so it stays smooth on an iPad); pointer-events off so it never
 // blocks a tap; stills itself for prefers-reduced-motion.
 
@@ -14,11 +14,12 @@ const BULBS = ["#e23a4b", "#f6d27a", "#3fbf6f", "#4aa8ff", "#f6d27a"];
 export function Christmas() {
   const flakes = Array.from({ length: 46 }, (_, i) => ({
     left: rand(i, 1) * 100,
-    size: 3 + rand(i, 2) * 6,
+    size: 9 + rand(i, 2) * 11,
     dur: 9 + rand(i, 3) * 12,
     delay: -rand(i, 4) * 20,
     drift: (rand(i, 5) - 0.5) * 80,
     opacity: 0.45 + rand(i, 6) * 0.5,
+    spin: (rand(i, 12) - 0.5) * 540,
   }));
   const sparkles = Array.from({ length: 18 }, (_, i) => ({
     left: rand(i, 7) * 100,
@@ -50,6 +51,7 @@ export function Christmas() {
             animationDuration: `${f.dur}s`,
             animationDelay: `${f.delay}s`,
             ["--drift" as string]: `${f.drift}px`,
+            ["--spin" as string]: `${f.spin}deg`,
           }}
         />
       ))}
