@@ -29,6 +29,7 @@ export function GET(req: NextRequest) {
       } catch {}
       nowPlaying = {
         source: "youtube",
+        videoId: /^youtube:video:([\w-]{11})$/.exec(y.uri ?? "")?.[1] ?? null, // the TV shows the video (muted)
         title: y.title,
         subtitle: y.subtitle,
         art: y.art,

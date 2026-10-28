@@ -220,7 +220,14 @@ It's a responsive web app: every feature works on a **laptop, iPad, or phone**. 
   full-screen now-playing page for a TV or projector. Shows album art (blurred
   behind), the song, progress, "requested by", the dedication, the next 4 songs and
   the request QR. No sign-in needed (party code, like the guest page); polls
-  `/api/tv` every 2 s; asks for a screen wake lock; hides the cursor.
+  `/api/tv` every 2 s; asks for a screen wake lock; hides the cursor. Christmas theme:
+  evergreen room with a cranberry glow, pine garlands, a gold/red framed cover with a
+  bow and holly, a candy-cane progress bar, the dedication as a gift tag. The album
+  art behind is luminosity-only, so the cover's colours can't tint the room. A
+  **YouTube song shows its video**: a second embed, **muted** (the sound stays on the
+  kiosk screen), re-synced when it drifts more than 2.5 s and paused with it
+  ([TvVideo.tsx](src/components/TvVideo.tsx)). Previews with sample data:
+  `/tv?code=demo` and `/tv?code=demo-youtube`.
 - **Event log, summary, keepsake** (*Settings ▸ Event*): every song that plays for
   ≥ 10 s (Spotify or YouTube) goes into the `plays` table with its start time, who
   requested it and the dedication. Pick a from/to range to see a summary (songs,
