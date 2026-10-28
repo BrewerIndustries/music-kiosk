@@ -179,6 +179,36 @@ It's a responsive web app: every feature works on a **laptop, iPad, or phone**. 
   rolling, only an HMAC of the token is stored), rate-limited sign-in / forgot.
   First run: `BOOTSTRAP_ADMIN_EMAIL` becomes the admin with no password — use
   *Forgot password?* to set it. Guests never sign in; they only reach `/api/guest/*`.
+- **Health light** (header dot, [HealthLight.tsx](src/components/HealthLight.tsx)):
+  green / amber / red; tap for the checks: kiosk server reachable, Spotify connected
+  and answering, a player active, this browser's player, a kiosk screen acting as
+  the audio host (`audioHostAlive`), YouTube connected (when on), errors in the last
+  10 min.
+- **Do not play** (*Settings ▸ Do not play*, setting `do_not_play`): block an artist
+  (matched against the song's artists / YouTube channel) or a song (from search).
+  Guests never see them in search and can't request them; the kiosk refuses to queue
+  them; search and the upcoming list mark them 🚫; the engine skips one that comes up
+  from the playlist or the Spotify app (once per song, `skippedBlocked`). *🚫 Never
+  play* on Now Playing blocks the current song and skips it.
+- **Dedications** (*Guests ▸ Dedications*, on by default, `dedications_on`): guests
+  can add up to 140 characters to a request (`queue.dedication`). Shown in approvals
+  and Up Next, and on the TV screen while the song plays. Use *Approve requests
+  first* to read them before they go up.
+- **TV screen** (`/tv?code=<party code>`, linked from *Guests ▸ TV screen*): a
+  full-screen now-playing page for a TV or projector. Shows album art (blurred
+  behind), the song, progress, "requested by", the dedication, the next 4 songs and
+  the request QR. No sign-in needed (party code, like the guest page); polls
+  `/api/tv` every 2 s; asks for a screen wake lock; hides the cursor.
+- **Event log, summary, keepsake** (*Settings ▸ Event*): every song that plays for
+  ≥ 10 s (Spotify or YouTube) goes into the `plays` table with its start time, who
+  requested it and the dedication. Pick a from/to range to see a summary (songs,
+  hours, guest requests, sounds, first/last song, top artists and requesters, repeats,
+  dedications, the full list), email it to yourself, or **create a keepsake Spotify
+  playlist** of it, in order. YouTube songs are matched by a cleaned-up title search,
+  and unmatched ones are listed. Creating playlists needs the `playlist-modify-*`
+  scopes (added 2026-10-28), so an account connected before then must reconnect
+  Spotify once. The granted scopes are stored as `spotify_scope`. The log only starts
+  with this version; earlier plays aren't in it.
 
 ## Local development (Mac)
 

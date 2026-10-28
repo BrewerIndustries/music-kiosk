@@ -5,6 +5,7 @@ import { PlaylistPicker } from "./PlaylistPicker";
 import type { KioskState, Notify } from "./types";
 import { AccountSection, UsersSection } from "./Account";
 import { DoNotPlaySection } from "./DoNotPlay";
+import { EventSection } from "./EventSection";
 
 export function SettingsPanel({
   state,
@@ -119,6 +120,8 @@ export function SettingsPanel({
           <button className="btn" onClick={() => save({ guestBaseUrl: guestBase })}>Save</button>
         </div>
       </section>
+
+      <EventSection notify={notify} />
 
       <section className="card p-4 text-sm">
         <div className="flex items-center justify-between">

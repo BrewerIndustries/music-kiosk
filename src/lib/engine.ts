@@ -666,7 +666,11 @@ export async function finishClip(id: string) {
   if (item?.kind === "youtube" && item.uri) {
     const heard = Math.max(youtubeResumeMs(item), Date.now() - s.memory.clip.startedAt);
     if (heard >= 10_000)
-      notePlayed({ uri: item.uri, title: item.title, subtitle: item.subtitle, art: item.art, durationMs: item.durationMs, explicit: false });
+      notePlayed(
+        { uri: item.uri, title: item.title, subtitle: item.subtitle, art: item.art, durationMs: item.durationMs, explicit: false },
+        heard,
+        s.memory.clip.startedAt,
+      );
   }
   setSetting(YT_CLIP, null);
   setSetting(YT_POS, null);

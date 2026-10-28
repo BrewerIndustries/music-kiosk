@@ -17,6 +17,18 @@ const FROM = { email: "noreply@dabrewer.dev", name: "Music Kiosk" };
 
 const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]!);
 
+// Any other kiosk email (e.g. the event summary). Returns true if it went out.
+export async function sendEmail(to: string, subject: string, text: string, html: string) {
+  if (!mailer) return false;
+  try {
+    await mailer.send({ to, from: FROM, subject, text, html });
+    return true;
+  } catch (e) {
+    logError("mail", e, `email to ${to}`);
+    return false;
+  }
+}
+
 // Returns true if the email went out.
 export async function sendLinkEmail(to: string, kind: "invite" | "reset", link: string, inviter?: string) {
   const subject = kind === "invite" ? "You're invited to the Music Kiosk 🎄" : "Reset your Music Kiosk password";
