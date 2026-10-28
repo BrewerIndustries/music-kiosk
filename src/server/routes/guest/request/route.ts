@@ -11,7 +11,7 @@ export const dynamic = "force-dynamic";
 // POST /api/guest/request { code, uri, name? } — a guest sends a song to Up Next.
 export function POST(req: NextRequest) {
   return handle(async () => {
-    const b = (await req.json()) as { code?: string; uri?: string; name?: string; guestId?: string };
+    const b = (await req.json()) as { code?: string; uri?: string; name?: string; guestId?: string; dedication?: string };
     if (!codeOk(b.code ?? null)) return NextResponse.json({ error: "This party link has expired." }, { status: 403 });
     const id = /^spotify:track:([A-Za-z0-9]{22})$/.exec(b.uri ?? "")?.[1];
     if (!id) return NextResponse.json({ error: "bad track" }, { status: 400 });
@@ -40,6 +40,8 @@ export function POST(req: NextRequest) {
         requestedBy: name,
         source: "guest",
         guestId: validGuestId(b.guestId),
+        // Shown on the TV screen while the song plays (when dedications are on).
+        dedication: rules.dedicationsOn ? (b.dedication ?? "").replace(/\s+/g, " ").trim().slice(0, 140) || null : null,
       },
       { status: requireApproval ? "pending" : "queued" },
     );

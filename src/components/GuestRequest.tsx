@@ -12,6 +12,7 @@ type Info = {
   open: boolean;
   limit: number;
   windowMin: number;
+  dedications?: boolean;
   nowPlaying: { title: string; subtitle: string; art: string | null } | null;
 };
 
@@ -45,6 +46,7 @@ export function GuestRequest({ code }: { code: string }) {
   const [q, setQ] = useState("");
   const [results, setResults] = useState<TrackSummary[]>([]);
   const [name, setName] = useState("");
+  const [dedication, setDedication] = useState("");
   const [sent, setSent] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -113,7 +115,9 @@ export function GuestRequest({ code }: { code: string }) {
         uri: t.uri,
         name,
         guestId: gid,
+        dedication: dedication.trim() || undefined,
       });
+      setDedication("");
       loadQueue();
       setSent(r.pending ? `“${t.title}” was sent — the host will approve it shortly.` : `“${t.title}” is in the queue!`);
       setQ("");
@@ -198,6 +202,20 @@ export function GuestRequest({ code }: { code: string }) {
                 }}
               />
             </label>
+            {info.dedications && (
+              <label className="mt-3 block text-sm">
+                Dedication <span className="text-muted">(optional — shows on the big screen)</span>
+                <textarea
+                  className="input mt-1 min-h-[3.5rem] resize-none"
+                  placeholder="For the happy couple… 💕"
+                  value={dedication}
+                  maxLength={140}
+                  rows={2}
+                  onChange={(e) => setDedication(e.target.value)}
+                />
+                {dedication.length > 100 && <span className="text-xs text-muted">{140 - dedication.length} left</span>}
+              </label>
+            )}
             <input
               type="search"
               className="input mt-3 text-lg"

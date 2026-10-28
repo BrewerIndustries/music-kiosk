@@ -27,6 +27,7 @@ export type QueueItem = {
   guestId: string | null;
   createdAt: string;
   playedAt: string | null;
+  dedication: string | null; // a guest's message, shown on the TV while it plays
 };
 
 type Row = {
@@ -45,6 +46,7 @@ type Row = {
   guest_id: string | null;
   created_at: string;
   played_at: string | null;
+  dedication: string | null;
 };
 
 function fromRow(r: Row): QueueItem {
@@ -64,6 +66,7 @@ function fromRow(r: Row): QueueItem {
     guestId: r.guest_id ?? null,
     createdAt: r.created_at,
     playedAt: r.played_at,
+    dedication: r.dedication ?? null,
   };
 }
 
@@ -116,6 +119,7 @@ export type NewItem = {
   requestedBy?: string | null;
   source?: "kiosk" | "guest";
   guestId?: string | null;
+  dedication?: string | null;
 };
 
 function maxPosition(): number {
@@ -138,8 +142,8 @@ export function addItem(item: NewItem, opts: { status?: QueueStatus; atFront?: b
   db()
     .prepare(
       `INSERT INTO queue (id, kind, status, position, uri, clip_key, title, subtitle, art, duration_ms,
-                          requested_by, source, guest_id, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                          requested_by, source, guest_id, created_at, dedication)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       id,
@@ -156,6 +160,7 @@ export function addItem(item: NewItem, opts: { status?: QueueStatus; atFront?: b
       item.source ?? "kiosk",
       item.guestId ?? null,
       new Date().toISOString(),
+      item.dedication?.trim().slice(0, 140) || null,
     );
   return getItem(id)!;
 }

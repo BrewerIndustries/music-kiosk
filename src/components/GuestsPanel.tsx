@@ -47,6 +47,7 @@ export function GuestsPanel({ state, notify }: { state: KioskState; notify: Noti
                   <div className="truncate text-xs text-muted">
                     {it.subtitle} · {it.requestedBy}
                   </div>
+                  {it.dedication && <div className="mt-0.5 break-words text-xs italic text-gold">💌 “{it.dedication}”</div>}
                 </div>
                 <button className="btn btn-primary" onClick={() => patch(it.id, "approve")}>Approve</button>
                 <button className="icon-btn" aria-label="Reject" onClick={() => patch(it.id, "reject")}>✕</button>

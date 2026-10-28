@@ -100,7 +100,48 @@ function init(d: Db) {
       at  INTEGER NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_auth_hits ON auth_hits(key, at);
+    -- Everything that actually played (>= 10 s), kept for the event summary and
+    -- the keepsake playlist. played_at = when it started (ms since epoch).
+    CREATE TABLE IF NOT EXISTS plays (
+      id           INTEGER PRIMARY KEY AUTOINCREMENT,
+      uri          TEXT NOT NULL,
+      kind         TEXT NOT NULL,           -- track | youtube
+      title        TEXT NOT NULL,
+      subtitle     TEXT NOT NULL DEFAULT '',
+      art          TEXT,
+      duration_ms  INTEGER NOT NULL DEFAULT 0,
+      played_ms    INTEGER NOT NULL DEFAULT 0, -- how much of it played
+      played_at    INTEGER NOT NULL,
+      requested_by TEXT,
+      source       TEXT,                    -- kiosk | guest | null (playlist)
+      dedication   TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_plays_at ON plays(played_at);
+    -- Kiosk playlists: Spotify and YouTube songs mixed, usable as the backdrop.
+    CREATE TABLE IF NOT EXISTS kiosk_playlists (
+      id         TEXT PRIMARY KEY,
+      name       TEXT NOT NULL,
+      shuffle    INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS kiosk_playlist_items (
+      id          TEXT PRIMARY KEY,
+      playlist_id TEXT NOT NULL,
+      position    REAL NOT NULL,
+      kind        TEXT NOT NULL,              -- track | youtube
+      uri         TEXT NOT NULL,
+      title       TEXT NOT NULL,
+      subtitle    TEXT NOT NULL DEFAULT '',
+      art         TEXT,
+      duration_ms INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE INDEX IF NOT EXISTS idx_kpl_items ON kiosk_playlist_items(playlist_id, position);
   `);
+  // Columns added after launch (ALTER fails harmlessly once they exist).
+  for (const sql of [`ALTER TABLE queue ADD COLUMN dedication TEXT`])
+    try {
+      d.exec(sql);
+    } catch {}
 }
 
 export function db(): Db {

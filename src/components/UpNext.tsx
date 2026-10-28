@@ -218,6 +218,7 @@ function Row({
             {item.requestedBy ? ` · ${item.requestedBy}` : ""}
             {item.durationMs ? ` · ${fmtTime(item.durationMs)}` : ""}
           </div>
+          {item.dedication && <div className="truncate text-xs italic text-gold">💌 “{item.dedication}”</div>}
         </div>
       </button>
       {locked ? (

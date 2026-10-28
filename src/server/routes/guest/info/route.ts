@@ -17,6 +17,7 @@ export function GET(req: NextRequest) {
     open: getSettings().guestRequestsOpen,
     limit: getSettings().guestLimit,
     windowMin: getSettings().guestWindowMin,
+    dedications: getSettings().dedicationsOn,
     nowPlaying: track ? { title: track.title, subtitle: track.subtitle, art: track.art } : null,
   });
 }
