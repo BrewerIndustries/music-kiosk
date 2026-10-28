@@ -21,10 +21,12 @@ import {
   setMusicVolume,
   skipToUpcoming,
   startPlaylist,
+  startKioskPlaylist,
   unduck,
 } from "@/lib/engine";
 import { getSettings } from "@/lib/settings";
 import { adminRoute } from "@/lib/auth";
+import { kioskPlaylistId } from "@/lib/kioskPlaylists";
 
 export const dynamic = "force-dynamic";
 
@@ -105,7 +107,9 @@ export function POST(req: NextRequest) {
       case "startPlaylist": {
         const { playlistUri } = getSettings();
         if (!playlistUri) return NextResponse.json({ error: "pick a playlist in Settings first" }, { status: 400 });
-        await startPlaylist(playlistUri, deviceId, b.paused === true);
+        const kioskId = kioskPlaylistId(playlistUri);
+        if (kioskId) await startKioskPlaylist(kioskId, deviceId, b.paused === true);
+        else await startPlaylist(playlistUri, deviceId, b.paused === true);
         break;
       }
       case "skipTo":

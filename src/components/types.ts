@@ -24,6 +24,7 @@ export type KioskState = {
   nowPlayingItem?: QueueItem | null;
   youtubeNow?: (QueueItem & { startedAt: number }) | null;
   audioHostAlive?: boolean;
+  backdropKind?: "kiosk" | "spotify"; // kiosk: the backdrop is a kiosk playlist (Spotify + YouTube)
   youtubeHeld?: boolean; // Spotify took over: the kiosk tab pauses the YouTube song
   ducked?: boolean;
   fading?: boolean;

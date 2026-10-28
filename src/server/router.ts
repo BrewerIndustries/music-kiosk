@@ -9,6 +9,8 @@ import * as guestQueue from "./routes/guest/queue/route";
 import * as guestRequest from "./routes/guest/request/route";
 import * as guestSearch from "./routes/guest/search/route";
 import * as tv from "./routes/tv/route";
+import * as kioskPlaylists from "./routes/kiosk-playlists/route";
+import * as kioskPlaylist from "./routes/kiosk-playlists/[id]/route";
 import * as event from "./routes/event/[action]/route";
 import * as importData from "./routes/import/route";
 import * as player from "./routes/player/route";
@@ -65,6 +67,8 @@ const table: [string, unknown][] = [
   ["/api/users", users],
   ["/api/youtube/:action", youtube],
   ["/api/event/:action", event],
+  ["/api/kiosk-playlists", kioskPlaylists],
+  ["/api/kiosk-playlists/:id", kioskPlaylist],
 ];
 
 const routes = table.map(([pattern, mod]) => {

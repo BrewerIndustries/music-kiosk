@@ -5,7 +5,8 @@ import { api, getPlayback, isConnected, summarize, SpotifyError, type SpPlayback
 import { CLIP_CUT_MS, decide, initialMemory, type Memory } from "./engine-core";
 import { logError, recentErrors } from "./log";
 import { getSettings, isBlocked, updateSettings } from "./settings";
-import { getItem, head, moveToFront, playsInBrowser, setStatus, upNext, type QueueItem } from "./queue";
+import { addItem, clearBackdropItems, getItem, head, moveToFront, playsInBrowser, setStatus, upNext, type QueueItem } from "./queue";
+import { kioskPlaylistId, nextFromPlaylist, resetCursor, upcomingFromPlaylist, type KioskPlaylistItem } from "./kioskPlaylists";
 import { getSetting, setSetting } from "./db";
 import { notePlayed, notePlaying, playHistory } from "./history";
 
@@ -458,6 +459,7 @@ async function tickBody() {
         }
       }
 
+      feedBackdrop();
       const pb = s.playback;
       const h = head();
       const decision = decide(
@@ -517,6 +519,12 @@ async function refreshUpcoming(currentUri: string | null) {
   s.upcomingStale = false;
   s.upcomingAt = Date.now();
   s.upcomingForUri = currentUri;
+  // A kiosk-playlist backdrop: what it plays next comes from the kiosk, not Spotify.
+  const pid = kioskBackdrop();
+  if (pid) {
+    s.upcoming = upcomingFromPlaylist(pid, UPCOMING_SHOWN, blockedItem).map(asSummary);
+    return;
+  }
   if (!currentUri) {
     s.upcoming = [];
     return;
@@ -601,9 +609,25 @@ export async function youtubeResumed() {
 
 // ⏭ while the kiosk tab plays a clip / YouTube song skips that, not Spotify.
 export async function skipCurrent() {
-  const c = state().memory.clip;
-  if (c) await finishClip(c.id);
-  else await api("POST", "/me/player/next");
+  const s = state();
+  const c = s.memory.clip;
+  if (c) return finishClip(c.id);
+  // A kiosk-playlist backdrop: Spotify's queue is empty until the engine hands the
+  // next song over near the end, so play that song ourselves.
+  if (kioskBackdrop() && !s.memory.handoff) {
+    feedBackdrop();
+    const h = head();
+    if (h?.kind === "track" && h.uri) {
+      await playTrackDirect(h, s.playback?.device?.id ?? undefined);
+      return poke();
+    }
+    if (h && playsInBrowser(h.kind)) {
+      await api("PUT", "/me/player/pause").catch(() => {});
+      await startInBrowser(h.id);
+      return poke();
+    }
+  }
+  await api("POST", "/me/player/next");
 }
 
 // A browser-played item that never reported back (tab closed, player stuck).
@@ -686,6 +710,7 @@ export async function finishClip(id: string) {
   }
   // Another browser item next (e.g. a run of YouTube songs): play it straight away
   // and keep Spotify waiting.
+  feedBackdrop();
   const next = head();
   if (next && playsInBrowser(next.kind) && hostAlive()) {
     await startInBrowser(next.id);
@@ -696,6 +721,13 @@ export async function finishClip(id: string) {
   // otherwise skipping resumes the playlist.
   const dev = await wakeSpotify();
   const h = head();
+  // A kiosk-playlist backdrop has no Spotify playlist to fall back on: play the
+  // next song directly.
+  if (kioskBackdrop() && h?.kind === "track" && h.uri) {
+    await playTrackDirect(h, dev);
+    poke();
+    return;
+  }
   if (h?.kind === "track" && h.uri) await handOff(h.id, h.uri, dev);
   await api("POST", "/me/player/next", undefined, { device_id: dev });
   await api("PUT", "/me/player/play", undefined, { device_id: dev }).catch(() => {}); // some devices stay paused after next
@@ -1051,6 +1083,79 @@ async function cueNextPaused() {
   await api("PUT", "/me/player/seek", undefined, { position_ms: "0", device_id: dev }).catch(() => {});
 }
 
+// ---- Kiosk-playlist backdrop ------------------------------------------------
+// The backdrop can be a kiosk playlist (Spotify + YouTube songs mixed). There's no
+// Spotify playlist behind it, so the engine keeps its next song waiting in Up Next
+// (source "backdrop", always after what people asked for) and the usual Up Next
+// machinery plays it: Spotify songs on Spotify, YouTube songs in the kiosk tab.
+
+const kioskBackdrop = () => kioskPlaylistId(getSettings().playlistUri);
+const blockedItem = (i: KioskPlaylistItem) => Boolean(isBlocked(i));
+const asSummary = (i: KioskPlaylistItem): TrackSummary => ({
+  uri: i.uri,
+  title: i.title,
+  subtitle: i.subtitle,
+  art: i.art,
+  durationMs: i.durationMs,
+  explicit: false,
+});
+
+function feedBackdrop(): QueueItem | null {
+  const pid = kioskBackdrop();
+  if (!pid || head()) return null;
+  const next = nextFromPlaylist(pid, blockedItem);
+  if (!next) return null;
+  state().upcomingStale = true;
+  return addItem({ ...next, source: "backdrop" });
+}
+
+// Play one of our tracks right now (no Spotify playlist behind it).
+async function playTrackDirect(item: QueueItem, deviceId?: string) {
+  const s = state();
+  setStatus(item.id, "handed_off");
+  s.memory = { ...s.memory, handoff: { id: item.id, uri: item.uri!, trackChanges: 0 } };
+  await api("PUT", "/me/player/play", { uris: [item.uri] }, { device_id: deviceId });
+}
+
+// Start a kiosk playlist as the backdrop, from the top (or a random song when
+// shuffled). `paused` loads its first song without playing it.
+export async function startKioskPlaylist(playlistId: string, deviceId: string | undefined, paused: boolean) {
+  const s = state();
+  clearBackdropItems();
+  resetCursor(playlistId);
+  // Whatever the kiosk tab is playing gives way.
+  if (s.memory.clip) {
+    setStatus(s.memory.clip.id, "played");
+    s.memory = { ...s.memory, clip: null };
+    s.youtubeHeld = null;
+  }
+  const next = nextFromPlaylist(playlistId, blockedItem);
+  if (!next) throw new Error("That playlist is empty (or every song is on the do-not-play list).");
+  const item = addItem({ ...next, source: "backdrop" }, { atFront: true });
+  // Spotify mustn't repeat the one song we hand it, or carry on with an old playlist.
+  await api("PUT", "/me/player/repeat", undefined, { state: "off", device_id: deviceId }).catch(() => {});
+  if (item.kind === "youtube") {
+    await api("PUT", "/me/player/pause").catch(() => {});
+    if (!paused) await startInBrowser(item.id);
+  } else {
+    const mute = paused && s.playback?.device?.supports_volume;
+    if (mute) await applyVolume(0).catch(() => {});
+    try {
+      await playTrackDirect(item, deviceId);
+      if (paused) {
+        await new Promise((r) => setTimeout(r, 500));
+        await api("PUT", "/me/player/pause", undefined, { device_id: deviceId }).catch(() => {});
+        await api("PUT", "/me/player/seek", undefined, { position_ms: "0", device_id: deviceId }).catch(() => {});
+        markStopped();
+      }
+    } finally {
+      if (mute) await applyVolume(musicVolume()).catch(() => {});
+    }
+  }
+  s.upcomingStale = true;
+  poke();
+}
+
 // Snapshot for the UI.
 export function snapshot() {
   const s = state();
@@ -1083,6 +1188,8 @@ export function snapshot() {
     resumeOffer: resumeOffer(),
     musicVolume: getSettings().musicVolume ?? pb?.device?.volume_percent ?? null,
     upcoming: s.upcoming.map((t) => (isBlocked(t, dnp) ? { ...t, blocked: true } : t)),
+    // "kiosk": the backdrop is a kiosk playlist (its upcoming songs are ours to queue).
+    backdropKind: kioskBackdrop() ? "kiosk" : "spotify",
     history: playHistory().slice(0, 30),
     errors: recentErrors().slice(0, 15),
   };

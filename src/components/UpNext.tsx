@@ -6,7 +6,8 @@ export function UpNext({ state, notify }: { state: KioskState; notify: Notify })
   const items = state.upNext ?? [];
   const upcoming = state.upcoming ?? [];
   const ctx = state.playback?.contextUri;
-  const fromName = ctx && ctx === state.settings?.playlistUri ? state.settings?.playlistName : null;
+  const kioskBackdrop = state.backdropKind === "kiosk";
+  const fromName = kioskBackdrop || (ctx && ctx === state.settings?.playlistUri) ? state.settings?.playlistName : null;
   const patch = (id: string, action: string) =>
     call("PATCH", `/api/queue/${id}`, { action }).catch((e) => notify(e.message));
   const remove = (id: string) => call("DELETE", `/api/queue/${id}`).catch((e) => notify(e.message));
@@ -101,6 +102,8 @@ export function UpNext({ state, notify }: { state: KioskState; notify: Notify })
                 key={`${t.uri}-${i}`}
                 track={t}
                 onPlay={() => {
+                  // A kiosk playlist's songs aren't in Spotify's queue: queue it to play now.
+                  if (kioskBackdrop) return enqueue(t, "playNow");
                   expect({ track: t, playing: true });
                   return call("POST", "/api/player", { action: "skipTo", uri: t.uri, index: i })
                     .then(() => notify(`Playing “${t.title}”`))
@@ -109,7 +112,7 @@ export function UpNext({ state, notify }: { state: KioskState; notify: Notify })
                       notify(e.message);
                     });
                 }}
-                onCue={() => {
+                onCue={kioskBackdrop ? undefined : () => {
                   expect({ track: t, playing: false });
                   return call("POST", "/api/player", { action: "skipTo", uri: t.uri, index: i, paused: true })
                     .then(() => notify(`“${t.title}” is loaded — press ▶ when ready`))
@@ -216,6 +219,7 @@ function Row({
             {item.kind === "youtube" && <span className="mr-1 rounded bg-red-600/80 px-1 text-[10px] font-semibold text-white">YouTube</span>}
             {item.kind === "clip" ? "Sound clip" : item.subtitle}
             {item.requestedBy ? ` · ${item.requestedBy}` : ""}
+            {item.source === "backdrop" ? " · from the playlist" : ""}
             {item.durationMs ? ` · ${fmtTime(item.durationMs)}` : ""}
           </div>
           {item.dedication && <div className="truncate text-xs italic text-gold">💌 “{item.dedication}”</div>}

@@ -7,6 +7,7 @@
 import { useEffect, useState } from "react";
 import { call, fmtTime } from "@/lib/client";
 import type { KioskState, Notify } from "./types";
+import { AddToPlaylist } from "./KioskPlaylists";
 
 type YtVideo = { uri: string; videoId: string; title: string; subtitle: string; art: string | null; durationMs: number };
 type YtPlaylist = { id: string; title: string; art: string | null; count: number };
@@ -94,6 +95,10 @@ export function YouTubeSearch({ state, notify }: { state: KioskState; notify: No
           <div className="flex shrink-0 gap-1">
             <button className="btn btn-primary" onClick={() => add(v)}>+ Next</button>
             <button className="btn hidden sm:inline-flex" onClick={() => add(v, true)}>▶ Now</button>
+            <AddToPlaylist
+              notify={notify}
+              song={{ kind: "youtube", uri: v.uri, title: v.title, subtitle: v.subtitle, art: v.art, durationMs: v.durationMs }}
+            />
           </div>
         )}
       </div>

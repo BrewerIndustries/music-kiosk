@@ -6,6 +6,7 @@ import type { KioskState, Notify } from "./types";
 import { AccountSection, UsersSection } from "./Account";
 import { DoNotPlaySection } from "./DoNotPlay";
 import { EventSection } from "./EventSection";
+import { KioskPlaylistsSection } from "./KioskPlaylists";
 
 export function SettingsPanel({
   state,
@@ -39,6 +40,8 @@ export function SettingsPanel({
         </p>
         <PlaylistPicker currentUri={s?.playlistUri ?? null} notify={notify} onPick={pickPlaylist} maxHeight="max-h-72" />
       </section>
+
+      <KioskPlaylistsSection state={state} notify={notify} />
 
       <section className="card space-y-4 p-4 text-sm">
         <h2 className="section-title">Music</h2>

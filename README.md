@@ -169,8 +169,30 @@ It's a responsive web app: every feature works on a **laptop, iPad, or phone**. 
   can't be embedded are filtered out. Guests stay Spotify-only but see YouTube songs
   in the queue. Limits: plays only on the kiosk screen (no remote control of the
   YouTube app); ads unless that browser is signed into YouTube Premium; a short
-  gap at each Spotify↔YouTube switch. Phase 2 (planned): mixed kiosk playlists as
-  the backdrop.
+  gap at each Spotify↔YouTube switch.
+- **Kiosk playlists, Spotify + YouTube mixed** (*Settings ▸ Kiosk playlists*,
+  [kioskPlaylists.ts](src/lib/kioskPlaylists.ts), tables `kiosk_playlists` /
+  `kiosk_playlist_items`). Create one, add songs with ＋☰ on any Spotify or YouTube
+  search result, or import a whole Spotify or YouTube playlist (up to 1000 songs,
+  duplicates skipped). Reorder (⇈ ↑ ↓), remove, rename, shuffle. *Use as backdrop*
+  (or pick it from the 🎵 chip, where kiosk playlists are listed first) sets
+  `playlist_uri = kiosk:playlist:<id>`.
+  - **How it plays:** there is no Spotify playlist behind it, so the engine keeps the
+    playlist's next song waiting in Up Next (`feedBackdrop()`; `source = 'backdrop'`,
+    position ≥ 1e12, so anything people add goes ahead of it; shown as "from the
+    playlist"). The normal Up Next machinery then plays it. Spotify songs are handed
+    to Spotify near the end of the current song. YouTube songs play on the kiosk
+    screen while Spotify waits.
+  - **Starting it** (`startKioskPlaylist`): clears waiting backdrop songs, resets the
+    cursor (setting `kiosk_backdrop_cursor`), turns Spotify's repeat off (or it would
+    repeat the single song we hand it), and plays the first song directly (`PUT
+    /me/player/play {uris}`), or loads it paused.
+  - **Skipping:** ⏭ and the end of a YouTube song also play the next song directly.
+  - **Looping, shuffle, do-not-play:** the playlist loops. Shuffle picks at random,
+    avoiding the last half of the playlist. Do-not-play songs are skipped. "Then
+    from …" lists the next 10 (none when shuffled); ▶ on one queues it to play now.
+  - **Changing the backdrop** drops any backdrop songs still waiting in Up Next.
+    Deleting the playlist that is the backdrop is refused.
 - **Accounts** ([src/lib/accounts.ts](src/lib/accounts.ts)): invite-only email +
   password. Admins invite from *Settings ▸ People* (emailed link, 7 days; the link is
   also shown to copy), set admin/member, disable, remove, resend; there is always

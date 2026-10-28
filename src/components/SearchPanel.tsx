@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { call, fmtTime } from "@/lib/client";
 import type { KioskState, Notify, TrackSummary } from "./types";
 import { YouTubeSearch } from "./YouTubeSearch";
+import { AddToPlaylist } from "./KioskPlaylists";
 
 // Spotify | YouTube tabs (YouTube only when it's connected and switched on).
 export function SearchPanel({ state, notify }: { state: KioskState; notify: Notify }) {
@@ -125,6 +126,10 @@ function SpotifySearch({ state, notify }: { state: KioskState; notify: Notify })
               <div className="flex shrink-0 gap-1">
                 <button className="btn btn-primary" onClick={() => add(t)}>+ Next</button>
                 <button className="btn hidden sm:inline-flex" onClick={() => add(t, true)}>▶ Now</button>
+                <AddToPlaylist
+                  notify={notify}
+                  song={{ kind: "track", uri: t.uri, title: t.title, subtitle: t.subtitle, art: t.art, durationMs: t.durationMs }}
+                />
               </div>
             )}
           </div>
