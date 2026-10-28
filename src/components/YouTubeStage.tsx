@@ -41,7 +41,7 @@ export function YouTubeStage({ state, notify }: { state: KioskState; notify: Not
     const id = videoIdOf(clip?.uri ?? null);
     if (!clip || !id || started.current.has(clip.id)) return;
     started.current.add(clip.id);
-    playYouTube(id).then(() =>
+    playYouTube(id, clip.startMs ?? 0).then(() =>
       call("POST", "/api/clip-done", { id: clip.id }).catch((e) => notify(e.message)),
     );
   }, [clip, notify]);

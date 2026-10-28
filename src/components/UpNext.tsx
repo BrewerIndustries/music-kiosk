@@ -13,9 +13,10 @@ export function UpNext({ state, notify }: { state: KioskState; notify: Notify })
   const history = state.history ?? [];
   // Put a song (from the history or the playlist) into Up Next: first, or playing now.
   const enqueue = (t: TrackSummary, how: "top" | "playNow") => {
-    if (how === "playNow") expect({ track: t, playing: true });
+    const youtube = t.uri.startsWith("youtube:");
+    if (how === "playNow" && !youtube) expect({ track: t, playing: true });
     return call("POST", "/api/queue", {
-      kind: "track",
+      kind: youtube ? "youtube" : "track",
       uri: t.uri,
       title: t.title,
       subtitle: t.subtitle,
@@ -30,6 +31,7 @@ export function UpNext({ state, notify }: { state: KioskState; notify: Notify })
       });
   };
 
+  const firstQueued = items.findIndex((i) => i.status === "queued");
   return (
     <section className="card p-4">
       {history.length > 0 && (
@@ -65,8 +67,9 @@ export function UpNext({ state, notify }: { state: KioskState; notify: Notify })
             <Row
               key={it.id}
               item={it}
-              first={i === 0}
+              first={i === firstQueued}
               last={i === items.length - 1}
+              onTop={() => patch(it.id, "top")}
               onUp={() => patch(it.id, "up")}
               onDown={() => patch(it.id, "down")}
               onPlayNow={() => {
@@ -149,12 +152,15 @@ function PlaylistRow({
         className="group flex min-w-0 flex-1 items-center gap-3 px-2 py-1 text-left"
       >
         <div className="art relative h-9 w-9 shrink-0 text-sm">
-          {track.art ? <img src={track.art} alt="" className="h-full w-full object-cover" /> : <span>♪</span>}
+          {track.art ? <img src={track.art} alt="" className="h-full w-full object-cover" /> : <span>{track.uri.startsWith("youtube:") ? "▶" : "♪"}</span>}
           <span className="absolute inset-0 hidden items-center justify-center bg-black/50 text-white group-hover:flex">▶</span>
         </div>
         <div className="min-w-0 flex-1">
           <div className="truncate text-sm">{track.title}</div>
-          <div className="truncate text-xs text-muted">{track.subtitle}</div>
+          <div className="truncate text-xs text-muted">
+            {track.uri.startsWith("youtube:") && <span className="mr-1 rounded bg-red-600/80 px-1 text-[10px] font-semibold text-white">YouTube</span>}
+            {track.subtitle}
+          </div>
         </div>
         <span className="shrink-0 text-xs tabular-nums text-muted">{fmtTime(track.durationMs)}</span>
       </button>
@@ -171,6 +177,7 @@ function Row({
   item,
   first,
   last,
+  onTop,
   onUp,
   onDown,
   onPlayNow,
@@ -179,6 +186,7 @@ function Row({
   item: QueueItem;
   first: boolean;
   last: boolean;
+  onTop: () => void;
   onUp: () => void;
   onDown: () => void;
   onPlayNow: () => void;
@@ -214,6 +222,7 @@ function Row({
       ) : (
         <div className="flex shrink-0 items-center gap-1">
           <button className="icon-btn" aria-label="Play now" title="Play now" onClick={onPlayNow}>▶</button>
+          <button className="icon-btn" aria-label="Move to top" title="Move to the top of Up Next" disabled={first} onClick={onTop}>⇈</button>
           <button className="icon-btn" aria-label="Move up" disabled={first} onClick={onUp}>↑</button>
           <button className="icon-btn" aria-label="Move down" disabled={last} onClick={onDown}>↓</button>
           <button className="icon-btn" aria-label="Remove" onClick={onRemove}>✕</button>

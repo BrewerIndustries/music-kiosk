@@ -1,5 +1,5 @@
 // Previously played: every song that actually played (≥ 10 s), newest first,
-// whatever started it (playlist, Up Next, Spotify app). Kept in settings so it
+// whatever started it (playlist, Up Next, Spotify app), plus YouTube songs. Kept in settings so it
 // survives restarts.
 import { getSetting, setSetting } from "./db";
 import type { TrackSummary } from "./spotify";
@@ -41,4 +41,12 @@ export function notePlaying(track: TrackSummary | null, progressMs: number) {
     }
   }
   setSetting(CURRENT, JSON.stringify({ track, maxMs: progressMs }));
+}
+
+// A song played outside Spotify (a YouTube song in the kiosk tab) finished.
+export function notePlayed(track: TrackSummary) {
+  const list = playHistory();
+  if (list[0]?.uri === track.uri) return;
+  list.unshift({ ...track, playedAt: new Date().toISOString() });
+  setSetting(KEY, JSON.stringify(list.slice(0, MAX)));
 }

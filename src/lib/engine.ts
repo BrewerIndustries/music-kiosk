@@ -7,7 +7,7 @@ import { logError, recentErrors } from "./log";
 import { getSettings, updateSettings } from "./settings";
 import { getItem, head, moveToFront, playsInBrowser, setStatus, upNext, type QueueItem } from "./queue";
 import { getSetting, setSetting } from "./db";
-import { notePlaying, playHistory } from "./history";
+import { notePlayed, notePlaying, playHistory } from "./history";
 
 const CLIP_TIMEOUT_MS = 5 * 60_000; // give up on a queued clip the browser never finished
 const YOUTUBE_GRACE_MS = 3 * 60_000; // …or a YouTube song this long after it should have ended
@@ -119,6 +119,33 @@ const HOLD_DUCK = "hold_duck";
 const HOLD_PAUSED = "hold_paused";
 const HOLD_TRANSITION = "hold_transition"; // music volume lowered for a song transition
 const LAST_DEVICE = "last_device"; // the Spotify player last seen (to wake it again)
+// The YouTube song in progress ({id, resume}) and where the kiosk tab last saw it
+// ({uri, ms, at}), so a deploy (server restart) or a kiosk reload picks it back up
+// at the same spot instead of dropping it.
+const YT_CLIP = "youtube_clip";
+const YT_POS = "youtube_pos";
+
+function readJson<T>(key: string): T | null {
+  try {
+    return JSON.parse(getSetting(key) ?? "null") as T | null;
+  } catch {
+    return null;
+  }
+}
+function saveYouTubeClip() {
+  const c = state().memory.clip;
+  if (c && getItem(c.id)?.kind === "youtube") setSetting(YT_CLIP, JSON.stringify({ id: c.id, resume: Boolean(c.resume) }));
+}
+
+// The kiosk tab's YouTube position, reported on its state poll.
+export function noteYouTubePosition(videoUri: string, ms: number) {
+  if (Number.isFinite(ms) && ms >= 0) setSetting(YT_POS, JSON.stringify({ uri: videoUri, ms: Math.round(ms), at: Date.now() }));
+}
+// Where to start the current YouTube song (0 unless it was cut off part-way).
+export function youtubeResumeMs(item: QueueItem | null): number {
+  const pos = readJson<{ uri: string; ms: number }>(YT_POS);
+  return item?.kind === "youtube" && pos?.uri === item.uri ? pos.ms : 0;
+}
 
 function recoverAfterRestart() {
   const s = state();
@@ -126,11 +153,21 @@ function recoverAfterRestart() {
   const handed = upNext().filter((i) => i.status === "handed_off");
   const track = handed.find((i) => i.kind === "track" && i.uri);
   if (track) s.memory = { ...s.memory, handoff: { id: track.id, uri: track.uri!, trackChanges: 0 } };
-  // A queued clip / YouTube song that was mid-play: it's gone; let the music carry on.
-  const inBrowser = handed.filter((i) => playsInBrowser(i.kind));
-  for (const c of inBrowser) setStatus(c.id, "played");
+  // A YouTube song that was mid-play (e.g. a deploy restarted us): carry on with it
+  // where the kiosk tab last saw it; Spotify stays paused for it.
+  const yt = handed.find((i) => i.kind === "youtube");
+  if (yt) {
+    const saved = readJson<{ id: string; resume: boolean }>(YT_CLIP);
+    s.memory = {
+      ...s.memory,
+      clip: { id: yt.id, startedAt: Date.now() - youtubeResumeMs(yt), resume: saved?.id === yt.id && saved.resume },
+    };
+  }
+  // A queued sound clip that was mid-play: it's gone; let the music carry on.
+  const clips = handed.filter((i) => playsInBrowser(i.kind) && i.id !== yt?.id);
+  for (const c of clips) setStatus(c.id, "played");
   // Music left lowered or paused for a clip: bring it back once we can talk to Spotify.
-  if (getSetting(HOLD_DUCK) || getSetting(HOLD_PAUSED) || getSetting(HOLD_TRANSITION) || inBrowser.length)
+  if (getSetting(HOLD_DUCK) || getSetting(HOLD_PAUSED) || getSetting(HOLD_TRANSITION) || clips.length)
     setTimeout(() => releaseHolds().catch((e) => logError("engine", e, "restoring music after restart")), 1500);
 }
 
@@ -437,6 +474,7 @@ async function tickBody() {
         } else if (a.type === "pauseForClip") {
           await api("PUT", "/me/player/pause");
           setStatus(a.id, "handed_off");
+          saveYouTubeClip();
           if (!hostAlive()) await finishClip(a.id); // nobody to play it: skip it
         }
       }
@@ -535,6 +573,7 @@ export function holdYouTube() {
   const c = s.memory.clip;
   if (!c || getItem(c.id)?.kind !== "youtube") return;
   s.memory = { ...s.memory, clip: { ...c, resume: true } };
+  saveYouTubeClip();
   s.youtubeHeld = c.id;
   poke();
 }
@@ -568,6 +607,7 @@ async function startInBrowser(id: string, resume = false) {
   const s = state();
   setStatus(id, "handed_off");
   s.memory = { ...s.memory, clip: { id, startedAt: Date.now(), resume } };
+  saveYouTubeClip();
   if (!hostAlive()) await finishClip(id); // nobody to play it: skip it
 }
 
@@ -610,6 +650,15 @@ export async function finishClip(id: string) {
   if (s.memory.clip?.id !== id) return;
   const resume = Boolean(s.memory.clip.resume);
   s.youtubeHeld = null;
+  const item = getItem(id);
+  // Previously played: a YouTube song that got going (≥ 10 s) counts, like Spotify's.
+  if (item?.kind === "youtube" && item.uri) {
+    const heard = Math.max(youtubeResumeMs(item), Date.now() - s.memory.clip.startedAt);
+    if (heard >= 10_000)
+      notePlayed({ uri: item.uri, title: item.title, subtitle: item.subtitle, art: item.art, durationMs: item.durationMs, explicit: false });
+  }
+  setSetting(YT_CLIP, null);
+  setSetting(YT_POS, null);
   setStatus(id, "played");
   s.memory = { ...s.memory, clip: null };
   // It cut into a Spotify song (▶ Now): carry on with that song; the rest of Up

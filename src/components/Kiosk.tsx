@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { call, KIOSK_CHANGED } from "@/lib/client";
 import { playQueuedClip, setClipVolume, unlockAudio } from "@/lib/clipPlayer";
 import { YouTubeStage } from "./YouTubeStage";
+import { youtubeStatus } from "@/lib/youtubePlayer";
 import { useSpotifyPlayer } from "./useSpotifyPlayer";
 import { NowPlaying } from "./NowPlaying";
 import { UpNext } from "./UpNext";
@@ -88,9 +89,12 @@ export function Kiosk({ envLabel }: { envLabel: string | null }) {
       try {
         const claim = claimRef.current ? "&claim=1" : "";
         const poke = pokeServer ? "&poke=1" : "";
+        // Where the YouTube song is, so a reload or deploy picks it back up there.
+        const ytNow = youtubeStatus();
+        const yt = ytNow.videoId && ytNow.positionMs > 0 ? `&yt=${ytNow.videoId}:${Math.round(ytNow.positionMs)}` : "";
         claimRef.current = false;
         pokeServer = false;
-        const s = await call<KioskState>("GET", `/api/state?client=${id}${claim}${poke}`);
+        const s = await call<KioskState>("GET", `/api/state?client=${id}${claim}${poke}${yt}`);
         if (alive) {
           setState(s);
           setOffline(false);

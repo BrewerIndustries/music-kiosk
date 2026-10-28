@@ -35,7 +35,7 @@ export type KioskState = {
   upNext?: QueueItem[];
   pending?: QueueItem[];
   recent?: QueueItem[];
-  clip?: QueueItem | null;
+  clip?: (QueueItem & { startMs?: number }) | null; // startMs: pick a YouTube song back up there
   isAudioHost?: boolean;
   settings?: KioskSettings;
 };

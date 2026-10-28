@@ -8,7 +8,7 @@
 // they hold Spotify (pause, or duck to *duck %*) — clipPlayer asks youtubeHold().
 
 type YTPlayer = {
-  loadVideoById(id: string): void;
+  loadVideoById(opts: { videoId: string; startSeconds?: number }): void;
   playVideo(): void;
   pauseVideo(): void;
   stopVideo(): void;
@@ -155,17 +155,19 @@ function getPlayer(videoId: string): Promise<YTPlayer> {
   return ready;
 }
 
-// Play one song; resolves when it ends, errors, or is skipped.
-export function playYouTube(videoId: string): Promise<void> {
+// Play one song (from startMs, when picking one back up after a reload or deploy);
+// resolves when it ends, errors, or is skipped.
+export function playYouTube(videoId: string, startMs = 0): Promise<void> {
   if (current) finish();
   return new Promise((resolve) => {
     current = { videoId, done: resolve };
-    emit({ videoId, playing: false, needsTap: false, positionMs: 0, durationMs: 0 });
+    emit({ videoId, playing: false, needsTap: false, positionMs: startMs, durationMs: 0 });
     const fresh = !ready;
+    const startSeconds = Math.floor(startMs / 1000);
     getPlayer(videoId).then((p) => {
       if (current?.videoId !== videoId) return;
       applyVolume();
-      if (!fresh) p.loadVideoById(videoId);
+      if (!fresh || startSeconds > 0) p.loadVideoById({ videoId, startSeconds });
       else p.playVideo();
       // Autoplay with sound can be refused (iOS, or a tab never tapped): ask for a tap.
       autoplayTimer = setTimeout(() => {

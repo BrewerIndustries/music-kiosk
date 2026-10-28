@@ -101,8 +101,11 @@ It's a responsive web app: every feature works on a **laptop, iPad, or phone**. 
 - **Choosing a playlist** loads it paused at the first song (muted for the load);
   ▶ or fade in starts it. ↺ Restart still plays from the top.
 - **Previously played** (top of the queue column, 3 rows, scrolls): every song that
-  played ≥ 10 s, from any source, kept in settings (`play_history`, last 50); ▶ plays
-  it again now, ⤒ puts it first in Up Next.
+  played ≥ 10 s, from any source including YouTube songs (`notePlayed()` in
+  `finishClip`), kept in settings (`play_history`, last 50); ▶ plays it again now,
+  ⤒ puts it first in Up Next.
+- **Up Next rows:** ▶ play now, ⇈ move to the top (`PATCH {action:"top"}`), ↑ / ↓
+  one place, ✕ remove.
 - **Fade between songs** (*Settings ▸ Music*, off by default, up to 12 s): the engine
   fades the last N s out and the next song in. Not a true overlap — Spotify's API
   can't crossfade; the Spotify app's own Crossfade setting does that when it is the
@@ -150,7 +153,12 @@ It's a responsive web app: every feature works on a **laptop, iPad, or phone**. 
   finishes Spotify carries on with its current song. Whenever the video starts
   playing (our ▶, *Tap to play*, or YouTube's own controls) the kiosk tab posts
   `youtubePlay`, which pauses Spotify. The "music stopped" banner (`resumeOffer`)
-  stays hidden while a YouTube song or clip is in progress, even when it's paused. A YouTube song started with ▶ Now mid-song resumes the interrupted Spotify
+  stays hidden while a YouTube song or clip is in progress, even when it's paused. **Surviving deploys and reloads:** the kiosk tab
+  reports its YouTube position on every state poll (`&yt=<videoId>:<ms>` → setting
+  `youtube_pos`), and the song in progress is saved as `youtube_clip`. After a server
+  restart, `recoverAfterRestart` keeps the YouTube song (Spotify stays paused) rather
+  than dropping it, and the kiosk tab, reloaded or not, starts it again at the saved
+  spot (`clip.startMs`). A YouTube song started with ▶ Now mid-song resumes the interrupted Spotify
   song afterwards (`memory.clip.resume`) instead of skipping it. On the kiosk screen
   the progress bar seeks (drag, or ←/→ 10 s). Spotify's player goes idle while a
   YouTube run plays, so handing back first wakes it (`wakeSpotify()`: transfer to the

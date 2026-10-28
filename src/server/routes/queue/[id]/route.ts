@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { approve, move, removeItem, setStatus } from "@/lib/queue";
+import { approve, getItem, move, moveToFront, removeItem, setStatus } from "@/lib/queue";
 import { playNow, poke } from "@/lib/engine";
 import { adminRoute } from "@/lib/auth";
 
@@ -7,12 +7,14 @@ export const dynamic = "force-dynamic";
 
 type Ctx = { params: Promise<{ id: string }> };
 
-// PATCH /api/queue/<id> { action: "up" | "down" | "playNow" | "approve" | "reject" }
+// PATCH /api/queue/<id> { action: "top" | "up" | "down" | "playNow" | "approve" | "reject" }
 export function PATCH(req: NextRequest, ctx: Ctx) {
   return adminRoute(req, async () => {
     const { id } = await ctx.params;
     const { action } = (await req.json()) as { action?: string };
-    if (action === "up" || action === "down") move(id, action);
+    if (action === "top") {
+      if (getItem(id)?.status === "queued") moveToFront(id);
+    } else if (action === "up" || action === "down") move(id, action);
     else if (action === "playNow") await playNow(id);
     else if (action === "approve") approve(id);
     else if (action === "reject") setStatus(id, "rejected");
