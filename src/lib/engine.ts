@@ -680,9 +680,30 @@ export async function wakeSpotify(): Promise<string | undefined> {
 }
 
 // The browser finished (or skipped) a queued clip / YouTube song: move on.
+// A different song is starting right now (Play now, a playlist, …): the clip /
+// YouTube song in the kiosk tab is over. It counts as played; the kiosk tab sees
+// the clip gone and stops its player. Returns whether there was one.
+export function dropBrowserItem(): boolean {
+  const s = state();
+  const c = s.memory.clip;
+  if (!c) return false;
+  setStatus(c.id, "played");
+  s.memory = { ...s.memory, clip: null };
+  s.youtubeHeld = null;
+  setSetting(YT_CLIP, null);
+  setSetting(YT_POS, null);
+  return true;
+}
+
 export async function finishClip(id: string) {
   const s = state();
-  if (s.memory.clip?.id !== id) return;
+  if (s.memory.clip?.id !== id) {
+    // Late word about an item we already moved past: make sure it isn't left
+    // "playing" (a restart would otherwise pick it back up).
+    const stale = getItem(id);
+    if (stale && playsInBrowser(stale.kind) && stale.status === "handed_off") setStatus(id, "played");
+    return;
+  }
   const resume = Boolean(s.memory.clip.resume);
   s.youtubeHeld = null;
   const item = getItem(id);
@@ -748,11 +769,20 @@ export async function playNow(id: string) {
     const midSong = s.memory.clip?.resume || Boolean(pb?.is_playing && left > CLIP_CUT_MS + 3000);
     await api("PUT", "/me/player/pause").catch(() => {});
     // Replacing a browser item that's already playing: it counts as played.
-    if (s.memory.clip) {
-      setStatus(s.memory.clip.id, "played");
-      s.memory = { ...s.memory, clip: null };
-    }
+    dropBrowserItem();
     await startInBrowser(id, midSong);
+    poke();
+    return;
+  }
+  // A Spotify song over a YouTube song / clip: that one is over. Spotify has been
+  // sitting paused (maybe dropped its player), so play this song directly.
+  if (dropBrowserItem()) {
+    const dev = await wakeSpotify();
+    if (s.memory.handoff) {
+      setStatus(s.memory.handoff.id, "queued");
+      s.memory = { ...s.memory, handoff: null };
+    }
+    await playTrackDirect(item, dev);
     poke();
     return;
   }
@@ -1124,11 +1154,7 @@ export async function startKioskPlaylist(playlistId: string, deviceId: string | 
   clearBackdropItems();
   resetCursor(playlistId);
   // Whatever the kiosk tab is playing gives way.
-  if (s.memory.clip) {
-    setStatus(s.memory.clip.id, "played");
-    s.memory = { ...s.memory, clip: null };
-    s.youtubeHeld = null;
-  }
+  dropBrowserItem();
   const next = nextFromPlaylist(playlistId, blockedItem);
   if (!next) throw new Error("That playlist is empty (or every song is on the do-not-play list).");
   const item = addItem({ ...next, source: "backdrop" }, { atFront: true });

@@ -152,7 +152,12 @@ It's a responsive web app: every feature works on a **laptop, iPad, or phone**. 
   `youtubeHeld` and pauses the video, and the song is marked `resume`, so when it
   finishes Spotify carries on with its current song. Whenever the video starts
   playing (our ▶, *Tap to play*, or YouTube's own controls) the kiosk tab posts
-  `youtubePlay`, which pauses Spotify. The "music stopped" banner (`resumeOffer`)
+  `youtubePlay`, which pauses Spotify. Starting a *different* song (▶ / Play now on an Up Next
+  song or a request, a playlist start, a song from the upcoming list) instead **ends**
+  the YouTube song (`dropBrowserItem()`: it counts as played and the kiosk tab stops
+  its player), and the new song plays directly on a re-woken Spotify player. Late
+  `clip-done` reports for an item already moved past just mark it played, so a
+  restart can't bring it back. The "music stopped" banner (`resumeOffer`)
   stays hidden while a YouTube song or clip is in progress, even when it's paused. **Surviving deploys and reloads:** the kiosk tab
   reports its YouTube position on every state poll (`&yt=<videoId>:<ms>` → setting
   `youtube_pos`), and the song in progress is saved as `youtube_clip`. After a server

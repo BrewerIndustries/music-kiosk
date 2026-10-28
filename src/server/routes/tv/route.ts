@@ -20,7 +20,9 @@ export function GET(req: NextRequest) {
     const settings = getSettings();
     const now = Date.now();
     let nowPlaying = null;
-    if (snap.youtubeNow) {
+    // A YouTube song paused while Spotify plays (holdYouTube): the TV shows Spotify.
+    const ytShowing = snap.youtubeNow && !(snap.youtubeHeld && snap.playback?.isPlaying);
+    if (ytShowing && snap.youtubeNow) {
       const y = snap.youtubeNow;
       let progressMs = Math.max(0, now - y.startedAt);
       try {

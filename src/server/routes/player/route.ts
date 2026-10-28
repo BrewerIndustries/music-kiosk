@@ -4,6 +4,7 @@ import {
   duck,
   fadeMusic,
   holdYouTube,
+  dropBrowserItem,
   wakeSpotify,
   youtubeResumed,
   markStopped,
@@ -45,12 +46,15 @@ export function POST(req: NextRequest) {
     let result: Record<string, unknown> = { ok: true };
     // One player at a time: anything that starts Spotify during a YouTube song
     // pauses the video on the kiosk screen (it plays on when its own ▶ is pressed).
-    const startsSpotify =
+    // Resuming Spotify pauses the YouTube song (it carries on later); starting a
+    // different song (a playlist, a song from the upcoming list) ends it.
+    const resumesSpotify =
       ["play", "previous", "fadeIn", "resumeOn"].includes(b.action as string) ||
-      (["startPlaylist", "skipTo"].includes(b.action as string) && b.paused !== true) ||
       (b.action === "transfer" && b.play !== false);
+    const startsOther = ["startPlaylist", "skipTo"].includes(b.action as string) && b.paused !== true;
     const duringYouTube = Boolean(snapshot().youtubeNow);
-    if (startsSpotify && duringYouTube) holdYouTube();
+    if (resumesSpotify && duringYouTube) holdYouTube();
+    if (startsOther) dropBrowserItem();
     switch (b.action) {
       case "play": {
         // Spotify sits idle through a YouTube song and may have dropped its player.

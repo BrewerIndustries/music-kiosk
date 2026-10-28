@@ -128,6 +128,12 @@ export function TvScreen() {
 
   return (
     <Shell art={np?.art ?? null}>
+      {tv && code !== "demo" && code !== "demo-youtube" && now - tv.fetchedAt > 10_000 && (
+        // Lost touch with the kiosk: say so rather than freeze silently on the last song.
+        <div className="absolute bottom-[1vh] left-[1vh] z-10 rounded-full bg-black/60 px-[1.4vh] py-[0.5vh] text-[1.6vh] text-[#cfe3d5]">
+          ⟳ Reconnecting…
+        </div>
+      )}
       <div className="grid h-full grid-rows-[1fr_auto] gap-[3vh] px-[4vh] pb-[4vh] pt-[9vh]">
         {np ? (
           <div className="flex min-h-0 items-center gap-[5vw]">
