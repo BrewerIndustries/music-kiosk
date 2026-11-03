@@ -975,7 +975,8 @@ function duckedLevel(base: number) {
 function musicVolume(): number {
   const { musicVolume } = getSettings();
   if (musicVolume != null) return musicVolume;
-  const v = state().playback?.device?.volume_percent ?? 70;
+  // A device at 0 is a fade leftover, not a level to restore to.
+  const v = state().playback?.device?.volume_percent || 70;
   updateSettings({ musicVolume: v });
   return v;
 }
@@ -1001,7 +1002,9 @@ async function volumeHousekeeping() {
     await restoreVolume();
     return;
   }
-  if (!s.duck && !isFading() && !s.transitioning && Date.now() - s.volumeSetAt > VOLUME_SYNC_QUIET_MS && dev.volume_percent !== musicVolume())
+  // Never adopt 0: an interrupted fade-out leaves the device there, and saving it
+  // would make every restore silent. Muting on purpose is the kiosk's slider.
+  if (!s.duck && !isFading() && !s.transitioning && Date.now() - s.volumeSetAt > VOLUME_SYNC_QUIET_MS && dev.volume_percent > 0 && dev.volume_percent !== musicVolume())
     updateSettings({ musicVolume: dev.volume_percent });
 }
 
