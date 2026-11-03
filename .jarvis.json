@@ -4,7 +4,7 @@
   "category": "standalone",
   "description": "Party jukebox: a Spotify playlist backdrop with a kiosk-owned Up Next queue (search all of Spotify, play next), guest song requests by QR code with configurable rules, and Soundboard clips that pause or play over the music. Invite-only email accounts. Runs in any browser — laptop, iPad, phone. Next.js static export on a Cloudflare Worker; the engine and state live in a Durable Object.",
   "tech": ["Next.js 16", "React 19", "TypeScript", "Tailwind CSS v4", "Cloudflare Workers", "Durable Objects (SQLite)", "Email Sending", "Spotify Web API + Web Playback SDK"],
-  "status": { "prod": "planned", "dev": "planned" },
+  "status": { "prod": "live", "dev": "live" },
   "deploy": {
     "prod": { "url": "https://musickiosk.dabrewer.dev/" },
     "dev": { "url": "https://musickiosk-dev.dabrewer.dev/" }

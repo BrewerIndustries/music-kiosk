@@ -12,9 +12,10 @@ It's a responsive web app: every feature works on a **laptop, iPad, or phone**. 
 - **Stack:** Next.js 16 + React 19 + Tailwind 4 (static export) on **Cloudflare
   Workers**: one Worker serves the pages and `/api/*`; all state and the playback
   engine live in a single **Durable Object** with SQLite (`KioskObject`).
-- **Status:** v1 tested on the Mac (local server); Cloudflare port on branch
-  `cloudflare`, smoke-tested under `wrangler dev`. Hosts:
-  musickiosk-dev.dabrewer.dev (dev), musickiosk.dabrewer.dev (prod).
+- **Status:** live on Cloudflare: musickiosk-dev.dabrewer.dev (dev) and
+  musickiosk.dabrewer.dev (prod, deployed 2026-11-03 for final testing before the
+  5 Dec wedding). Prod started with empty settings and uses the same Spotify and
+  Google apps as dev (each needs the prod redirect URI added).
 
 ## Cloudflare architecture
 
@@ -301,7 +302,9 @@ Deploy (wrangler's OAuth login; the shell's `CLOUDFLARE_API_TOKEN` is DNS-only):
 ```bash
 env -u CLOUDFLARE_API_TOKEN npm run deploy:dev     # or: npm run deploy (prod)
 # once per env: wrangler secret put SPOTIFY_CLIENT_ID | SPOTIFY_CLIENT_SECRET |
-#   SESSION_SECRET | SOUNDBOARD_TOKEN   (add --env dev for dev)
+#   SESSION_SECRET | SOUNDBOARD_TOKEN | GOOGLE_CLIENT_ID | GOOGLE_CLIENT_SECRET
+#   (add --env dev for dev). Prod SOUNDBOARD_TOKEN = Soundboard prod's JARVIS_TOKEN
+#   (soundboard-cf/.prod.secrets).
 ```
 
 **Moving the old local kiosk's settings over** (playlist, volumes, fades, rules,
