@@ -2,8 +2,24 @@
   "id": "music-kiosk",
   "name": "Music Kiosk",
   "category": "standalone",
-  "description": "Party jukebox: a Spotify playlist backdrop with a kiosk-owned Up Next queue (search all of Spotify, play next), guest song requests by QR code, and Soundboard clips that pause or play over the music. Runs in any browser — laptop, iPad, phone.",
-  "tech": ["Next.js 16", "React 19", "TypeScript", "Tailwind CSS v4", "SQLite (better-sqlite3)", "Spotify Web API + Web Playback SDK"],
-  "status": { "prod": "planned", "dev": "local" },
-  "deploy": { "prod": { "port": 4860 }, "dev": { "port": 4870 } }
+  "description": "Party jukebox: a Spotify playlist backdrop with a kiosk-owned Up Next queue (search all of Spotify, play next), guest song requests by QR code with configurable rules, and Soundboard clips that pause or play over the music. Invite-only email accounts. Runs in any browser \u2014 laptop, iPad, phone. Next.js static export on a Cloudflare Worker; the engine and state live in a Durable Object.",
+  "tech": [
+    "Next.js 16",
+    "React 19",
+    "TypeScript",
+    "Tailwind CSS v4",
+    "Cloudflare Workers",
+    "Durable Objects (SQLite)",
+    "Email Sending",
+    "Spotify Web API + Web Playback SDK"
+  ],
+  "status": {
+    "prod": "in_progress",
+    "dev": "live"
+  },
+  "deploy": {
+    "dev": {
+      "url": "https://musickiosk-dev.dabrewer.dev/"
+    }
+  }
 }
