@@ -3,8 +3,9 @@
 //
 // Strategy: Spotify's own queue holds at most ONE of our tracks, handed off a few
 // seconds before the current track ends. Spotify plays it gaplessly, then falls
-// back to the playlist context on its own. A clip at the head of Up Next pauses
-// Spotify just before the track ends; the kiosk browser plays it and reports back.
+// back to the playlist context on its own. A clip or YouTube song at the head of Up
+// Next pauses Spotify just before the track ends; the kiosk browser plays it and
+// reports back.
 
 export const HANDOFF_MS = 8000; // hand the next track to Spotify this close to the end
 export const CLIP_CUT_MS = 1500; // pause for a queued clip this close to the end
@@ -16,15 +17,17 @@ export type PlaybackSnapshot = {
   durationMs: number;
 };
 
-export type HeadItem = { id: string; kind: "track" | "clip"; uri: string | null };
+export type HeadItem = { id: string; kind: "track" | "clip" | "youtube"; uri: string | null };
 
 export type Memory = {
   lastUri: string | null;
   lastProgressMs: number;
   // A track we've put in Spotify's queue that hasn't started yet.
   handoff: { id: string; uri: string; trackChanges: number } | null;
-  // A queued clip the browser is playing while Spotify is paused.
-  clip: { id: string; startedAt: number } | null;
+  // A queued clip / YouTube song the browser is playing while Spotify is paused.
+  // `resume`: it interrupted a Spotify song mid-way (▶ Now), so pick that song back
+  // up afterwards instead of skipping to the next one.
+  clip: { id: string; startedAt: number; resume?: boolean } | null;
   // Up Next item currently playing on Spotify (for "requested by" display).
   nowPlayingId: string | null;
 };
@@ -87,7 +90,7 @@ export function decide(pb: PlaybackSnapshot | null, headItem: HeadItem | null, p
     if (headItem.kind === "track" && headItem.uri && remaining <= HANDOFF_MS) {
       actions.push({ type: "enqueue", id: headItem.id, uri: headItem.uri });
       memory.handoff = { id: headItem.id, uri: headItem.uri, trackChanges: 0 };
-    } else if (headItem.kind === "clip" && remaining <= CLIP_CUT_MS) {
+    } else if (headItem.kind !== "track" && remaining <= CLIP_CUT_MS) {
       actions.push({ type: "pauseForClip", id: headItem.id });
       memory.clip = { id: headItem.id, startedAt: Date.now() };
       return { actions, memory, delayMs: 500 };

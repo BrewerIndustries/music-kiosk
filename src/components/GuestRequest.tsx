@@ -1,7 +1,7 @@
 "use client";
 // Guest page (reached by QR): search Spotify and send a song to Up Next, see
 // what's queued, and follow your own requests through the queue.
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { call, fmtTime } from "@/lib/client";
 import type { TrackSummary } from "@/lib/spotify";
 
@@ -9,6 +9,10 @@ type Info = {
   ok: boolean;
   ready: boolean;
   requireApproval: boolean;
+  open: boolean;
+  limit: number;
+  windowMin: number;
+  dedications?: boolean;
   nowPlaying: { title: string; subtitle: string; art: string | null } | null;
 };
 
@@ -42,6 +46,7 @@ export function GuestRequest({ code }: { code: string }) {
   const [q, setQ] = useState("");
   const [results, setResults] = useState<TrackSummary[]>([]);
   const [name, setName] = useState("");
+  const [dedication, setDedication] = useState("");
   const [sent, setSent] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -90,7 +95,15 @@ export function GuestRequest({ code }: { code: string }) {
     return () => clearTimeout(t);
   }, [q, code]);
 
+  const nameRef = useRef<HTMLInputElement>(null);
+  const missingName = !name.trim();
   const send = async (t: TrackSummary) => {
+    // The host wants to know who asked for each song.
+    if (missingName) {
+      setError("Add your name first so we know who requested it.");
+      nameRef.current?.focus();
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
@@ -102,7 +115,9 @@ export function GuestRequest({ code }: { code: string }) {
         uri: t.uri,
         name,
         guestId: gid,
+        dedication: dedication.trim() || undefined,
       });
+      setDedication("");
       loadQueue();
       setSent(r.pending ? `“${t.title}” was sent — the host will approve it shortly.` : `“${t.title}” is in the queue!`);
       setQ("");
@@ -164,16 +179,43 @@ export function GuestRequest({ code }: { code: string }) {
 
       {!info.ready ? (
         <p className="mt-6 text-muted">The kiosk isn&apos;t ready for requests yet.</p>
+      ) : !info.open ? (
+        <p className="mt-6 rounded-xl bg-line/60 p-4 text-sm text-muted">
+          🎁 Song requests are closed right now — enjoy the music!
+        </p>
       ) : (
         !sent && (
           <>
-            <input
-              className="input mt-4"
-              placeholder="Your name (optional)"
-              value={name}
-              maxLength={40}
-              onChange={(e) => setName(e.target.value)}
-            />
+            <label className="mt-4 block text-sm">
+              Your name <span className="text-accent">*</span>
+              <input
+                ref={nameRef}
+                className={`input mt-1 ${error && missingName ? "border-red-400" : ""}`}
+                placeholder="So we know who requested it"
+                value={name}
+                maxLength={40}
+                required
+                autoComplete="given-name"
+                onChange={(e) => {
+                  setName(e.target.value);
+                  if (e.target.value.trim() && error) setError(null);
+                }}
+              />
+            </label>
+            {info.dedications && (
+              <label className="mt-3 block text-sm">
+                Dedication <span className="text-muted">(optional — shows on the big screen)</span>
+                <textarea
+                  className="input mt-1 min-h-[3.5rem] resize-none"
+                  placeholder="For the happy couple… 💕"
+                  value={dedication}
+                  maxLength={140}
+                  rows={2}
+                  onChange={(e) => setDedication(e.target.value)}
+                />
+                {dedication.length > 100 && <span className="text-xs text-muted">{140 - dedication.length} left</span>}
+              </label>
+            )}
             <input
               type="search"
               className="input mt-3 text-lg"
@@ -303,6 +345,15 @@ function SongLine({
       {right}
     </li>
   );
+}
+
+// The /request page is static; the party code comes from the URL in the browser.
+export function GuestRequestPage() {
+  const [code, setCode] = useState<string | null>(null);
+  useEffect(() => {
+    setCode((new URLSearchParams(location.search).get("code") ?? "").toUpperCase());
+  }, []);
+  return code === null ? <Centered>Loading…</Centered> : <GuestRequest code={code} />;
 }
 
 function Centered({ children }: { children: React.ReactNode }) {

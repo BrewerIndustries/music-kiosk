@@ -1,10 +1,14 @@
-// Up Next — the kiosk's own queue (Spotify tracks + soundboard clips). Spotify's
+// Up Next — the kiosk's own queue (Spotify tracks, YouTube songs, soundboard clips). Spotify's
 // queue is append-only, so this table is the source of truth and the engine feeds
 // Spotify one track at a time.
 import { randomUUID } from "crypto";
 import { db } from "./db";
 
-export type QueueKind = "track" | "clip";
+export type QueueKind = "track" | "clip" | "youtube";
+
+// Clips and YouTube songs play in the kiosk browser tab (the audio host) while
+// Spotify waits paused; tracks are handed to Spotify.
+export const playsInBrowser = (kind: QueueKind) => kind === "clip" || kind === "youtube";
 export type QueueStatus = "pending" | "queued" | "handed_off" | "played" | "rejected";
 
 export type QueueItem = {
@@ -19,10 +23,11 @@ export type QueueItem = {
   art: string | null;
   durationMs: number;
   requestedBy: string | null;
-  source: "kiosk" | "guest";
+  source: "kiosk" | "guest" | "backdrop"; // backdrop: fed from a kiosk-playlist backdrop
   guestId: string | null;
   createdAt: string;
   playedAt: string | null;
+  dedication: string | null; // a guest's message, shown on the TV while it plays
 };
 
 type Row = {
@@ -37,10 +42,11 @@ type Row = {
   art: string | null;
   duration_ms: number;
   requested_by: string | null;
-  source: "kiosk" | "guest";
+  source: "kiosk" | "guest" | "backdrop"; // backdrop: fed from a kiosk-playlist backdrop
   guest_id: string | null;
   created_at: string;
   played_at: string | null;
+  dedication: string | null;
 };
 
 function fromRow(r: Row): QueueItem {
@@ -60,6 +66,7 @@ function fromRow(r: Row): QueueItem {
     guestId: r.guest_id ?? null,
     createdAt: r.created_at,
     playedAt: r.played_at,
+    dedication: r.dedication ?? null,
   };
 }
 
@@ -110,12 +117,19 @@ export type NewItem = {
   art?: string | null;
   durationMs?: number;
   requestedBy?: string | null;
-  source?: "kiosk" | "guest";
+  source?: "kiosk" | "guest" | "backdrop";
   guestId?: string | null;
+  dedication?: string | null;
 };
 
+// Backdrop songs (from a kiosk-playlist backdrop) always sort after what people
+// asked for, so anything added goes in ahead of them.
+const BACKDROP_POSITION = 1e12;
+
 function maxPosition(): number {
-  const r = db().prepare(`SELECT MAX(position) AS p FROM queue WHERE status IN ('queued','pending')`).get() as {
+  const r = db()
+    .prepare(`SELECT MAX(position) AS p FROM queue WHERE status IN ('queued','pending') AND source != 'backdrop'`)
+    .get() as {
     p: number | null;
   };
   return r.p ?? 0;
@@ -130,12 +144,16 @@ function minPosition(): number {
 
 export function addItem(item: NewItem, opts: { status?: QueueStatus; atFront?: boolean } = {}): QueueItem {
   const id = randomUUID();
-  const position = opts.atFront ? minPosition() - 1 : maxPosition() + 1;
+  const position = opts.atFront
+    ? minPosition() - 1
+    : item.source === "backdrop"
+      ? BACKDROP_POSITION + Date.now() / 1000
+      : maxPosition() + 1;
   db()
     .prepare(
       `INSERT INTO queue (id, kind, status, position, uri, clip_key, title, subtitle, art, duration_ms,
-                          requested_by, source, guest_id, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                          requested_by, source, guest_id, created_at, dedication)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       id,
@@ -152,6 +170,7 @@ export function addItem(item: NewItem, opts: { status?: QueueStatus; atFront?: b
       item.source ?? "kiosk",
       item.guestId ?? null,
       new Date().toISOString(),
+      item.dedication?.trim().slice(0, 140) || null,
     );
   return getItem(id)!;
 }
@@ -208,3 +227,9 @@ export function isQueued(uri: string): boolean {
 export function clearQueue() {
   db().prepare(`DELETE FROM queue WHERE status IN ('queued','pending')`).run();
 }
+
+// Drop backdrop songs still waiting in Up Next (e.g. the backdrop changed).
+export function clearBackdropItems() {
+  db().prepare(`DELETE FROM queue WHERE source = 'backdrop' AND status = 'queued'`).run();
+}
+

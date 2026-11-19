@@ -1,43 +1,34 @@
-// Kiosk admin gate. The kiosk itself runs unlocked once the PIN is entered (a
-// cookie remembers it); guests only ever reach the /api/guest/* routes. If
-// KIOSK_PIN is unset, admin routes are open (fine for local testing).
-import { createHmac, timingSafeEqual } from "crypto";
+// Route guards. Kiosk controls need a signed-in account (src/lib/accounts.ts);
+// managing accounts needs an admin. Guests only ever reach /api/guest/* (party code).
 import { NextRequest, NextResponse } from "next/server";
+import { SESSION_COOKIE, sessionUser, type User } from "./accounts";
 import { logError } from "./log";
 
-export const ADMIN_COOKIE = "kiosk_admin";
-
-function pin() {
-  return process.env.KIOSK_PIN ?? "";
+export function currentUser(req: NextRequest): User | null {
+  return sessionUser(req.cookies.get(SESSION_COOKIE)?.value);
 }
 
-export function pinRequired() {
-  return Boolean(pin());
-}
-
-export function adminCookieValue() {
-  return createHmac("sha256", pin()).update("music-kiosk-admin").digest("hex");
-}
-
-export function checkPin(candidate: string) {
-  const a = Buffer.from(candidate);
-  const b = Buffer.from(pin());
-  return a.length === b.length && timingSafeEqual(a, b);
-}
-
+// Name kept from the PIN days: "may operate the kiosk".
 export function isAdmin(req: NextRequest) {
-  if (!pinRequired()) return true;
-  return req.cookies.get(ADMIN_COOKIE)?.value === adminCookieValue();
+  return Boolean(currentUser(req));
 }
 
 export function denied() {
-  return NextResponse.json({ error: "locked" }, { status: 401 });
+  return NextResponse.json({ error: "signed out" }, { status: 401 });
 }
 
-// Wrap a handler body: 401 when locked, Spotify/other errors → JSON 4xx/5xx.
+// Wrap a handler body: 401 when signed out, Spotify/other errors → JSON 4xx/5xx.
 export async function adminRoute(req: NextRequest, fn: () => Promise<Response> | Response) {
   if (!isAdmin(req)) return denied();
   return handle(fn, req);
+}
+
+// Account management: admins only.
+export async function ownerRoute(req: NextRequest, fn: (me: User) => Promise<Response> | Response) {
+  const me = currentUser(req);
+  if (!me) return denied();
+  if (me.role !== "admin") return NextResponse.json({ error: "admins only" }, { status: 403 });
+  return handle(() => fn(me), req);
 }
 
 // Runs a route body; any throw is logged (with the route and, for Spotify errors,

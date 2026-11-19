@@ -2,8 +2,46 @@
 import { useEffect, useState } from "react";
 import { call, fmtTime } from "@/lib/client";
 import type { KioskState, Notify, TrackSummary } from "./types";
+import { YouTubeSearch } from "./YouTubeSearch";
+import { AddToPlaylist } from "./KioskPlaylists";
 
+// Spotify | YouTube tabs (YouTube only when it's connected and switched on).
 export function SearchPanel({ state, notify }: { state: KioskState; notify: Notify }) {
+  const ytOn = Boolean(state.settings?.youtubeEnabled && state.youtube?.connected);
+  const [source, setSourceState] = useState<"spotify" | "youtube">("spotify");
+  useEffect(() => {
+    try {
+      if (localStorage.getItem("kiosk.searchSource") === "youtube") setSourceState("youtube");
+    } catch {}
+  }, []);
+  const setSource = (v: "spotify" | "youtube") => {
+    setSourceState(v);
+    try {
+      localStorage.setItem("kiosk.searchSource", v);
+    } catch {}
+  };
+  const showYt = ytOn && source === "youtube";
+  return (
+    <section className="card p-4">
+      {ytOn && (
+        <div className="mb-3 grid grid-cols-2 gap-1 rounded-xl bg-line/40 p-1">
+          {(["spotify", "youtube"] as const).map((v) => (
+            <button
+              key={v}
+              onClick={() => setSource(v)}
+              className={`rounded-lg py-1.5 text-sm font-medium ${source === v ? "bg-accent text-white" : "text-muted"}`}
+            >
+              {v === "spotify" ? "Spotify" : "YouTube"}
+            </button>
+          ))}
+        </div>
+      )}
+      {showYt ? <YouTubeSearch state={state} notify={notify} /> : <SpotifySearch state={state} notify={notify} />}
+    </section>
+  );
+}
+
+function SpotifySearch({ state, notify }: { state: KioskState; notify: Notify }) {
   const [q, setQState] = useState("");
   useEffect(() => {
     try {
@@ -50,7 +88,7 @@ export function SearchPanel({ state, notify }: { state: KioskState; notify: Noti
       .catch((e) => notify(e.message));
 
   return (
-    <section className="card p-4">
+    <>
       <input
         type="search"
         value={q}
@@ -80,17 +118,23 @@ export function SearchPanel({ state, notify }: { state: KioskState; notify: Noti
                 {t.subtitle} · {fmtTime(t.durationMs)}
               </div>
             </div>
-            {queued.has(t.uri) ? (
+            {t.blocked ? (
+              <span className="text-xs text-muted" title="On the do-not-play list (Settings)">🚫 Do not play</span>
+            ) : queued.has(t.uri) ? (
               <span className="text-xs text-accent">Queued</span>
             ) : (
               <div className="flex shrink-0 gap-1">
                 <button className="btn btn-primary" onClick={() => add(t)}>+ Next</button>
                 <button className="btn hidden sm:inline-flex" onClick={() => add(t, true)}>▶ Now</button>
+                <AddToPlaylist
+                  notify={notify}
+                  song={{ kind: "track", uri: t.uri, title: t.title, subtitle: t.subtitle, art: t.art, durationMs: t.durationMs }}
+                />
               </div>
             )}
           </div>
         ))}
       </div>
-    </section>
+    </>
   );
 }

@@ -11,7 +11,15 @@ export const SCOPES = [
   "user-read-currently-playing",
   "playlist-read-private",
   "playlist-read-collaborative",
+  "playlist-modify-private", // the keepsake playlist (Settings ▸ Event)
+  "playlist-modify-public",
 ].join(" ");
+
+// Was the account connected with every scope we ask for now? (Scopes added later
+// need a reconnect: Settings ▸ Spotify.)
+export function hasScope(scope: string) {
+  return (getSetting("spotify_scope") ?? "").split(" ").includes(scope);
+}
 
 const API = "https://api.spotify.com/v1";
 
@@ -41,7 +49,9 @@ async function tokenRequest(body: Record<string, string>) {
     access_token: string;
     refresh_token?: string;
     expires_in: number;
+    scope?: string;
   };
+  if (json.scope) setSetting("spotify_scope", json.scope);
   setSetting("spotify_access_token", json.access_token);
   setSetting("spotify_expires_at", String(Date.now() + (json.expires_in - 60) * 1000));
   if (json.refresh_token) setSetting("spotify_refresh_token", json.refresh_token);
@@ -55,7 +65,7 @@ export async function exchangeCode(code: string) {
 }
 
 export function disconnect() {
-  for (const k of ["spotify_access_token", "spotify_refresh_token", "spotify_expires_at", "spotify_user"])
+  for (const k of ["spotify_access_token", "spotify_refresh_token", "spotify_expires_at", "spotify_user", "spotify_scope"])
     setSetting(k, null);
 }
 
@@ -173,6 +183,7 @@ export type TrackSummary = {
   art: string | null;
   durationMs: number;
   explicit: boolean;
+  blocked?: boolean; // on the do-not-play list (set by the kiosk search / upcoming list)
 };
 
 export function summarize(t: SpTrack): TrackSummary {

@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { call, expect, fmtTime, KIOSK_EXPECT, type Expectation } from "@/lib/client";
 import { PlaylistPicker } from "./PlaylistPicker";
 import { VolumeControls } from "./VolumeControls";
@@ -23,6 +23,23 @@ export function NowPlaying({ state, notify, sdkDeviceId }: Props) {
     return () => clearInterval(t);
   }, []);
 
+  // Fade toggles (per screen, like the sound cards): on = ▶ fades in, and ⏸ fades
+  // out then cues the next song, paused at its start.
+  const [fades, setFades] = useState<{ in?: boolean; out?: boolean }>({});
+  useEffect(() => {
+    try {
+      setFades(JSON.parse(localStorage.getItem("kiosk.musicFades") ?? "{}"));
+    } catch {}
+  }, []);
+  const toggleFade = (dir: "in" | "out") =>
+    setFades((prev) => {
+      const next = { ...prev, [dir]: !prev[dir] };
+      try {
+        localStorage.setItem("kiosk.musicFades", JSON.stringify(next));
+      } catch {}
+      return next;
+    });
+
   // What a tap just asked for, shown at once and held until Spotify agrees (or
   // for a few seconds, after which Spotify's word wins).
   const [want, setWant] = useState<(Expectation & { at: number }) | null>(null);
@@ -42,14 +59,46 @@ export function NowPlaying({ state, notify, sdkDeviceId }: Props) {
       : Boolean(pb?.isPlaying);
 
   const track = shownTrack;
+  const durationMs = track?.durationMs ?? 0;
   // Freeze the bar the moment pause is tapped; restart it for a song being loaded.
   const until = pb?.isPlaying ? (isPlaying ? now : (wantLive?.at ?? now)) : pb?.at ?? now;
-  const progress = pendingTrack
-    ? 0
-    : pb
-      ? Math.min(pb.progressMs + Math.max(0, until - pb.at), track?.durationMs ?? 0)
-      : 0;
-  const pct = track?.durationMs ? (progress / track.durationMs) * 100 : 0;
+  const reported = pendingTrack ? 0 : pb ? pb.progressMs + Math.max(0, until - pb.at) : 0;
+
+  // Scrubbing: while dragging the bar shows the finger; after letting go it shows
+  // the new spot until Spotify reports it (or 4 s pass).
+  const [scrub, setScrub] = useState<number | null>(null);
+  const [seekTo, setSeekTo] = useState<{ ms: number; at: number; uri: string } | null>(null);
+  const seekLive =
+    seekTo && seekTo.uri === track?.uri && now - seekTo.at < 4000 && Math.abs(reported - (seekTo.ms + (isPlaying ? now - seekTo.at : 0))) > 2000
+      ? seekTo
+      : null;
+  const progress = Math.min(
+    scrub ?? (seekLive ? seekLive.ms + (isPlaying ? now - seekLive.at : 0) : reported),
+    durationMs,
+  );
+  const pct = durationMs ? (progress / durationMs) * 100 : 0;
+
+  const barRef = useRef<HTMLDivElement>(null);
+  const posAt = (clientX: number) => {
+    const r = barRef.current!.getBoundingClientRect();
+    return Math.round(Math.min(1, Math.max(0, (clientX - r.left) / r.width)) * durationMs);
+  };
+  const scrubbing = {
+    onPointerDown: (e: React.PointerEvent) => {
+      if (!durationMs || pendingTrack) return;
+      e.currentTarget.setPointerCapture(e.pointerId);
+      setScrub(posAt(e.clientX));
+    },
+    onPointerMove: (e: React.PointerEvent) => scrub !== null && setScrub(posAt(e.clientX)),
+    onPointerUp: (e: React.PointerEvent) => {
+      if (scrub === null) return;
+      const ms = posAt(e.clientX);
+      setScrub(null);
+      setSeekTo({ ms, at: Date.now(), uri: track!.uri });
+      act("seek", { positionMs: ms }).then((ok) => !ok && setSeekTo(null));
+    },
+    onPointerCancel: () => setScrub(null),
+  };
 
   // Transport actions. If the target player has vanished (the classic case: this
   // tab reloaded, so its old browser player is gone), move playback to this tab's
@@ -141,8 +190,34 @@ export function NowPlaying({ state, notify, sdkDeviceId }: Props) {
 
       {track && (
         <div className="mt-3">
-          <div className="h-1.5 overflow-hidden rounded-full bg-line">
-            <div className="h-full bg-accent" style={{ width: `${pct}%` }} />
+          {/* Tall invisible hit area around a thin bar, so it's easy to grab on a touchscreen. */}
+          <div
+            ref={barRef}
+            {...scrubbing}
+            role="slider"
+            aria-label="Song position"
+            aria-valuemin={0}
+            aria-valuemax={Math.round(durationMs / 1000)}
+            aria-valuenow={Math.round(progress / 1000)}
+            tabIndex={0}
+            onKeyDown={(e) => {
+              const step = e.key === "ArrowRight" ? 10_000 : e.key === "ArrowLeft" ? -10_000 : 0;
+              if (!step || !durationMs) return;
+              const ms = Math.min(durationMs, Math.max(0, progress + step));
+              setSeekTo({ ms, at: Date.now(), uri: track.uri });
+              act("seek", { positionMs: ms });
+            }}
+            className="group relative flex h-6 cursor-pointer touch-none items-center"
+          >
+            <div className="h-1.5 w-full overflow-hidden rounded-full bg-line">
+              <div className="h-full bg-accent" style={{ width: `${pct}%` }} />
+            </div>
+            <div
+              className={`absolute top-1/2 h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full bg-[var(--gold)] shadow transition-transform ${
+                scrub !== null ? "scale-125" : "scale-75 group-hover:scale-100"
+              }`}
+              style={{ left: `${pct}%` }}
+            />
           </div>
           <div className="mt-1 flex justify-between text-xs text-muted tabular-nums">
             <span>{fmtTime(progress)}</span>
@@ -154,31 +229,39 @@ export function NowPlaying({ state, notify, sdkDeviceId }: Props) {
       <div className="mt-3 flex items-center justify-center gap-2">
         <button className="btn-round" aria-label="Previous" onClick={() => act("previous")}>⏮</button>
         <button
-          className="btn-round"
-          aria-label="Fade in"
-          title={`Fade in (${((state.settings?.musicFadeInMs ?? 3000) / 1000).toFixed(1)} s)`}
-          disabled={state.fading}
-          onClick={() => (pb?.track ? act("fadeIn") : startPlaylist())}
+          className="btn-round fade-toggle"
+          aria-label="Fade in on play"
+          aria-pressed={Boolean(fades.in)}
+          title={`Fade in on ▶ (${((state.settings?.musicFadeInMs ?? 3000) / 1000).toFixed(1)} s): ${fades.in ? "on" : "off"}`}
+          onClick={() => toggleFade("in")}
         >
           <FadeIcon dir="in" />
         </button>
         {isPlaying ? (
-          <button className="btn-round btn-round-lg" aria-label="Pause" onClick={() => act("pause")}>⏸</button>
+          <button
+            className="btn-round btn-round-lg"
+            aria-label={fades.out ? "Fade out" : "Pause"}
+            disabled={state.fading}
+            onClick={() => (fades.out ? act("fadeOut", { cueNext: true }) : act("pause"))}
+          >
+            ⏸
+          </button>
         ) : (
           <button
             className="btn-round btn-round-lg"
-            aria-label="Play"
-            onClick={() => (pb?.track ? act("play") : startPlaylist())}
+            aria-label={fades.in ? "Fade in" : "Play"}
+            disabled={state.fading}
+            onClick={() => (!pb?.track ? startPlaylist() : act(fades.in ? "fadeIn" : "play"))}
           >
             ▶
           </button>
         )}
         <button
-          className="btn-round"
-          aria-label="Fade out"
-          title={`Fade out (${((state.settings?.musicFadeOutMs ?? 5000) / 1000).toFixed(1)} s)`}
-          disabled={!isPlaying || state.fading}
-          onClick={() => act("fadeOut")}
+          className="btn-round fade-toggle"
+          aria-label="Fade out on pause"
+          aria-pressed={Boolean(fades.out)}
+          title={`Fade out on ⏸ (${((state.settings?.musicFadeOutMs ?? 5000) / 1000).toFixed(1)} s), then cue the next song paused: ${fades.out ? "on" : "off"}`}
+          onClick={() => toggleFade("out")}
         >
           <FadeIcon dir="out" />
         </button>
@@ -209,6 +292,22 @@ export function NowPlaying({ state, notify, sdkDeviceId }: Props) {
         {playlistUri && (
           <button className="chip" onClick={startPlaylist} title="Start the playlist from the top">
             ↺ Restart
+          </button>
+        )}
+        {pb?.track && (
+          <button
+            className="chip"
+            title="Add this song to the do-not-play list and skip it"
+            onClick={() => {
+              const t = pb.track!;
+              if (!confirm(`Never play “${t.title}” again? (Settings ▸ Do not play to undo)`)) return;
+              call("POST", "/api/settings", { addDoNotPlay: { kind: "track", uri: t.uri, title: t.title, subtitle: t.subtitle } })
+                .then(() => act("next"))
+                .then(() => notify(`Skipped — “${t.title}” won't play again`))
+                .catch((e) => notify(e.message));
+            }}
+          >
+            🚫 Never play
           </button>
         )}
         {pb && (

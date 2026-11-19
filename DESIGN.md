@@ -72,7 +72,26 @@ server. Requests land in a D1 inbox; the kiosk polls it and appends to Up Next
 (optional "approve requests" toggle for admin). The kiosk shows the QR on screen. A
 rotating party code + per-device rate limit keeps randoms out.
 
-## Architecture
+## Architecture (v2 — Cloudflare, 2026-10)
+
+Moved off the home server so the wedding doesn't depend on home internet, power or
+the NAT, and so guests can reach the request page from any network.
+
+- **One Worker per app** serving the static Next.js export and `/api/*` (not GitHub
+  Pages + Worker: one origin keeps the session cookie and OAuth simple).
+- **One Durable Object** (`KioskObject`, SQLite) owns all state *and* runs the engine
+  on alarms. A single object serialises every request and tick, which is exactly the
+  "one engine" model the server had, and it keeps playing with no browser open. It
+  backs off to a 1-minute poll when idle.
+- **Guests** hit the same Worker (`/request?code=`); the separate guest Worker + D1
+  inbox planned below is no longer needed.
+- **Auth**: invite-only email + password accounts replace the PIN — the kiosk is now on
+  the public internet. Guests still never sign in.
+- **Soundboard**: also its own Worker (D1 + private R2); the kiosk reaches it over a
+  service binding with a bearer token.
+- Cost: Workers Paid ($5/mo) for Email Sending; everything else is well inside it.
+
+## Architecture (v1 — home server, superseded)
 
 - **Kiosk app**: Next.js 16 + SQLite on the jarvis server, usual dev/prod split
   (ports TBD, e.g. 4860/4870), tailnet-only via nginx. Holds the Spotify user

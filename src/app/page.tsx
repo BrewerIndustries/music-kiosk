@@ -1,9 +1,8 @@
 import { Kiosk } from "@/components/Kiosk";
 
-export const dynamic = "force-dynamic";
+// Amber banner off prod: NEXT_PUBLIC_KIOSK_ENV is baked in per build (dev / local).
+const env = process.env.NEXT_PUBLIC_KIOSK_ENV || null;
 
 export default function Home() {
-  // Amber banner off prod (JARVIS_ENV=dev on the server, or local `next dev`).
-  const env = process.env.JARVIS_ENV ?? (process.env.NODE_ENV === "development" ? "local" : null);
   return <Kiosk envLabel={env ? `${env} — not the live kiosk` : null} />;
 }

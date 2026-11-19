@@ -29,17 +29,19 @@ const MODES: { id: Mode; label: string; hint: string }[] = [
 ];
 
 // Soundboard accent keys (src/lib/types.ts there) → pad colours on the dark kiosk.
+// Soundboard accent names → the Christmas palette (the Soundboard default, purple,
+// becomes cranberry), so cards still differ but match the theme.
 const ACCENTS: Record<string, string> = {
-  blue: "#60a5fa",
-  sky: "#38bdf8",
-  teal: "#2dd4bf",
-  green: "#4ade80",
-  purple: "#a78bfa",
-  amber: "#fbbf24",
-  coral: "#fb923c",
-  red: "#f87171",
-  rose: "#fb7185",
-  gray: "#a1a1aa",
+  purple: "#e0435a", // cranberry
+  red: "#c8203a", // deep cranberry
+  rose: "#f08aa0", // candy cane
+  coral: "#e0894f", // gingerbread
+  amber: "#f6d27a", // tinsel gold
+  green: "#4fb26b", // evergreen
+  teal: "#3aa98a", // holly
+  blue: "#8fc3e6", // frost
+  sky: "#cfe6f5", // snow
+  gray: "#c4c8cc", // silver
 };
 
 function loadMode(): Mode {
@@ -56,6 +58,24 @@ export function SoundsPanel({ state, notify }: { state: KioskState; notify: Noti
   const [boardId, setBoardId] = useState<string | null>(null);
   const [pageId, setPageId] = useState<string | null>(null);
   const [mode, setModeState] = useState<Mode>("pause");
+  // Play over: lower the music under the clip (on), or leave it alone (off).
+  const [duckOn, setDuckOnState] = useState(true);
+  const setDuckOn = (on: boolean) => {
+    setDuckOnState(on);
+    try {
+      localStorage.setItem("kiosk.duckOn", on ? "1" : "0");
+    } catch {}
+  };
+  // Per-sound fade toggles: ▶ fades in / ■ fades out when on (kept per device).
+  const [fades, setFades] = useState<Record<string, { in?: boolean; out?: boolean }>>({});
+  const toggleFade = (id: string, dir: "in" | "out") =>
+    setFades((prev) => {
+      const next = { ...prev, [id]: { ...prev[id], [dir]: !prev[id]?.[dir] } };
+      try {
+        localStorage.setItem("kiosk.padFades", JSON.stringify(next));
+      } catch {}
+      return next;
+    });
   // Re-render whenever any clip changes state (playing, paused, fading…).
   useSyncExternalStore(subscribeClips, clipsVersion, () => 0);
   const fadeInMs = state.settings?.fadeInMs ?? 2000;
@@ -64,6 +84,10 @@ export function SoundsPanel({ state, notify }: { state: KioskState; notify: Noti
 
   useEffect(() => {
     setModeState(loadMode());
+    try {
+      setDuckOnState(localStorage.getItem("kiosk.duckOn") !== "0");
+      setFades(JSON.parse(localStorage.getItem("kiosk.padFades") ?? "{}"));
+    } catch {}
     call<{ boards: SbBoard[]; manageUrl: string }>("GET", "/api/soundboard/boards")
       .then((r) => {
         setBoards(r.boards);
@@ -104,24 +128,33 @@ export function SoundsPanel({ state, notify }: { state: KioskState; notify: Noti
         .catch((e) => notify(e.message));
       return;
     }
-    const note = await startClip(s.id, s.key, mode);
+    const note = await startClip(s.id, s.key, liveMode, fades[s.id]?.in ? fadeInMs : 0);
     if (note) notify(note);
   };
 
   // The card buttons always play live; in Up Next mode they use Pause & play.
-  const liveMode: ClipMode = mode === "queue" ? "pause" : mode;
+  const liveMode: ClipMode = mode === "queue" ? "pause" : mode === "duck" && !duckOn ? "over" : mode;
   const showNote = (p: Promise<string | null> | void) => p?.then((n) => n && notify(n));
   const controls = (s: SbSound) => ({
     status: clipStatus(s.id),
+    fadeIn: Boolean(fades[s.id]?.in),
+    fadeOut: Boolean(fades[s.id]?.out),
     onPlayPause: () => {
       const st = clipStatus(s.id);
-      if (st === "stopped") showNote(startClip(s.id, s.key, liveMode));
-      else if (st === "paused") resumeClip(s.id);
-      else pauseClip(s.id);
+      if (st === "stopped" || st === "paused") {
+        if (fades[s.id]?.in) showNote(fadeInClip(s.id, s.key, liveMode, fadeInMs));
+        else if (st === "paused") resumeClip(s.id);
+        else showNote(startClip(s.id, s.key, liveMode));
+      } else pauseClip(s.id);
     },
-    onStop: () => stopClip(s.id),
-    onFadeIn: () => showNote(fadeInClip(s.id, s.key, liveMode, fadeInMs)),
-    onFadeOut: () => fadeOutClip(s.id, fadeOutMs),
+    // A second ■ while fading out stops at once.
+    onStop: () => {
+      const st = clipStatus(s.id);
+      if (fades[s.id]?.out && st !== "fading-out" && st !== "paused") fadeOutClip(s.id, fadeOutMs);
+      else stopClip(s.id);
+    },
+    onToggleFadeIn: () => toggleFade(s.id, "in"),
+    onToggleFadeOut: () => toggleFade(s.id, "out"),
   });
 
   const anyPlaying = activeClipCount() > 0;
@@ -143,7 +176,30 @@ export function SoundsPanel({ state, notify }: { state: KioskState; notify: Noti
           </button>
         ))}
       </div>
-      <p className="mt-2 text-xs text-muted">{MODES.find((m) => m.id === mode)?.hint}</p>
+      <div className="mt-2 flex items-center justify-between gap-3">
+        <p className="text-xs text-muted">
+          {mode === "duck" && !duckOn
+            ? "Plays the clip over the music at full volume."
+            : MODES.find((m) => m.id === mode)?.hint}
+        </p>
+        {mode === "duck" && (
+          <label className="flex shrink-0 cursor-pointer items-center gap-2 text-xs">
+            Lower the music
+            <button
+              type="button"
+              role="switch"
+              aria-checked={duckOn}
+              aria-label="Lower the music while a sound plays"
+              onClick={() => setDuckOn(!duckOn)}
+              className={`relative h-6 w-11 rounded-full transition-colors ${duckOn ? "bg-accent" : "bg-line"}`}
+            >
+              <span
+                className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-all ${duckOn ? "left-[22px]" : "left-0.5"}`}
+              />
+            </button>
+          </label>
+        )}
+      </div>
 
       {error && <p className="mt-4 text-sm text-red-400">Couldn’t reach Soundboard: {error}</p>}
       {boards === null && !error && <p className="mt-4 text-sm text-muted">Loading sounds…</p>}
@@ -240,8 +296,10 @@ function SoundCard({
   onFire,
   onPlayPause,
   onStop,
-  onFadeIn,
-  onFadeOut,
+  fadeIn,
+  fadeOut,
+  onToggleFadeIn,
+  onToggleFadeOut,
 }: {
   sound: SbSound;
   color: string;
@@ -250,8 +308,10 @@ function SoundCard({
   onFire: () => void;
   onPlayPause: () => void;
   onStop: () => void;
-  onFadeIn: () => void;
-  onFadeOut: () => void;
+  fadeIn: boolean;
+  fadeOut: boolean;
+  onToggleFadeIn: () => void;
+  onToggleFadeOut: () => void;
 }) {
   const live = status !== "stopped";
   const playingNow = status === "playing" || status === "fading-in" || status === "fading-out";
@@ -272,10 +332,22 @@ function SoundCard({
         <button className="pad-btn" onClick={onStop} disabled={!live} aria-label="Stop" title="Stop">
           ■
         </button>
-        <button className="pad-btn" onClick={onFadeIn} aria-label="Fade in" title="Fade in">
+        <button
+          className="pad-btn"
+          onClick={onToggleFadeIn}
+          aria-pressed={fadeIn}
+          aria-label="Fade in on play"
+          title={fadeIn ? "Fade in on ▶: on" : "Fade in on ▶: off"}
+        >
           <FadeIcon dir="in" />
         </button>
-        <button className="pad-btn" onClick={onFadeOut} disabled={!live} aria-label="Fade out" title="Fade out">
+        <button
+          className="pad-btn"
+          onClick={onToggleFadeOut}
+          aria-pressed={fadeOut}
+          aria-label="Fade out on stop"
+          title={fadeOut ? "Fade out on ■: on" : "Fade out on ■: off"}
+        >
           <FadeIcon dir="out" />
         </button>
       </div>

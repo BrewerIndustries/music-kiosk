@@ -1,0 +1,68 @@
+{
+  // Music Kiosk — one Worker: the static UI (Next.js export in out/) + /api/* handled
+  // by the single Kiosk Durable Object (SQLite state + the playback engine on alarms).
+  // Default (top-level) env = PROD: musickiosk.dabrewer.dev. `--env dev` = DEV:
+  // musickiosk-dev.dabrewer.dev.
+  // Secrets (per env, `wrangler secret put <NAME> [--env dev]`):
+  //   SPOTIFY_CLIENT_ID, SPOTIFY_CLIENT_SECRET, SESSION_SECRET, SOUNDBOARD_TOKEN,
+  //   GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET (YouTube; optional)
+  //   (SOUNDBOARD_TOKEN = that Soundboard env's JARVIS_TOKEN)
+  // Email: `send_email` binding EMAIL (Cloudflare Email Sending, noreply@dabrewer.dev).
+  //   Sent by the Worker, not the Durable Object (a DO's send_email binding only
+  //   reaches verified Email Routing addresses): the DO calls the Worker's `Mailer`
+  //   RPC entrypoint over the MAILER self-binding. Fails soft (link logged + shown).
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "musickiosk",
+  "main": "src/server/worker.ts",
+  "compatibility_date": "2026-10-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "account_id": "c7961085693c68b85b3f19dc03e15266",
+  "workers_dev": false,
+  "preview_urls": false,
+  "observability": { "enabled": true },
+  // The API routes keep their Next.js imports; at bundle time they get the shim.
+  "alias": { "next/server": "./src/server/next-shim.ts" },
+  // run_worker_first: browser navigations to /api/* (Spotify login, OAuth callback)
+  // would otherwise get the static 404 page instead of reaching the Worker.
+  "assets": {
+    "directory": "./out",
+    "binding": "ASSETS",
+    "not_found_handling": "404-page",
+    "run_worker_first": ["/api/*"]
+  },
+  "durable_objects": { "bindings": [{ "name": "KIOSK", "class_name": "KioskObject" }] },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["KioskObject"] }],
+  "routes": [{ "pattern": "musickiosk.dabrewer.dev", "custom_domain": true }],
+  "vars": {
+    "SPOTIFY_REDIRECT_URI": "https://musickiosk.dabrewer.dev/api/spotify/callback",
+        "GOOGLE_REDIRECT_URI": "https://musickiosk.dabrewer.dev/api/youtube/callback",
+    "SOUNDBOARD_URL": "https://soundboard.dabrewer.dev",
+    "BOOTSTRAP_ADMIN_EMAIL": "myemailisdanmail@gmail.com"
+  },
+  "services": [
+    { "binding": "SOUNDBOARD", "service": "soundboard" },
+    { "binding": "MAILER", "service": "musickiosk", "entrypoint": "Mailer" }
+  ],
+  "send_email": [{ "name": "EMAIL" }],
+
+  "env": {
+    "dev": {
+      "name": "musickiosk-dev",
+      "workers_dev": false,
+      "preview_urls": false,
+      "routes": [{ "pattern": "musickiosk-dev.dabrewer.dev", "custom_domain": true }],
+      "durable_objects": { "bindings": [{ "name": "KIOSK", "class_name": "KioskObject" }] },
+      "vars": {
+        "SPOTIFY_REDIRECT_URI": "https://musickiosk-dev.dabrewer.dev/api/spotify/callback",
+        "GOOGLE_REDIRECT_URI": "https://musickiosk-dev.dabrewer.dev/api/youtube/callback",
+        "SOUNDBOARD_URL": "https://soundboard-dev.dabrewer.dev",
+        "BOOTSTRAP_ADMIN_EMAIL": "myemailisdanmail@gmail.com"
+      },
+      "services": [
+        { "binding": "SOUNDBOARD", "service": "soundboard-dev" },
+        { "binding": "MAILER", "service": "musickiosk-dev", "entrypoint": "Mailer" }
+      ],
+      "send_email": [{ "name": "EMAIL" }]
+    }
+  }
+}

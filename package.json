@@ -4,21 +4,23 @@
   "private": true,
   "scripts": {
     "dev": "next dev -H 0.0.0.0 -p 3000",
+    "dev:api": "wrangler dev --port 8787 --env dev --local",
     "build": "next build",
-    "start": "next start -p 4860",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.worker.json --noEmit",
     "lint": "eslint",
-    "test": "vitest run"
+    "test": "vitest run",
+    "deploy:dev": "NEXT_PUBLIC_KIOSK_ENV=dev next build && wrangler deploy --env dev",
+    "deploy": "next build && wrangler deploy"
   },
   "dependencies": {
-    "better-sqlite3": "^11.8.1",
     "next": "16.3.6",
     "qrcode": "^1.5.4",
     "react": "19.2.4",
     "react-dom": "19.2.4"
   },
   "devDependencies": {
+    "@cloudflare/workers-types": "^5.20261026.1",
     "@tailwindcss/postcss": "^4",
-    "@types/better-sqlite3": "^7.6.12",
     "@types/node": "^20",
     "@types/qrcode": "^1.5.5",
     "@types/react": "^19",
@@ -27,6 +29,7 @@
     "eslint-config-next": "16.3.6",
     "tailwindcss": "^4",
     "typescript": "^5",
-    "vitest": "^3.2.4"
+    "vitest": "^3.2.4",
+    "wrangler": "^4.152.0"
   }
 }

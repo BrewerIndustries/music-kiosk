@@ -2,6 +2,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { call, KIOSK_CHANGED } from "@/lib/client";
 import { playQueuedClip, setClipVolume, unlockAudio } from "@/lib/clipPlayer";
+import { YouTubeStage } from "./YouTubeStage";
+import { HealthLight } from "./HealthLight";
+import { youtubeStatus } from "@/lib/youtubePlayer";
 import { useSpotifyPlayer } from "./useSpotifyPlayer";
 import { NowPlaying } from "./NowPlaying";
 import { UpNext } from "./UpNext";
@@ -10,6 +13,7 @@ import { SoundsPanel } from "./SoundsPanel";
 import { GuestsPanel } from "./GuestsPanel";
 import { SettingsPanel } from "./SettingsPanel";
 import type { KioskState } from "./types";
+import { SignIn } from "./Account";
 
 type Tab = "queue" | "search" | "sounds" | "guests" | "settings";
 
@@ -86,9 +90,12 @@ export function Kiosk({ envLabel }: { envLabel: string | null }) {
       try {
         const claim = claimRef.current ? "&claim=1" : "";
         const poke = pokeServer ? "&poke=1" : "";
+        // Where the YouTube song is, so a reload or deploy picks it back up there.
+        const ytNow = youtubeStatus();
+        const yt = ytNow.videoId && ytNow.positionMs > 0 ? `&yt=${ytNow.videoId}:${Math.round(ytNow.positionMs)}` : "";
         claimRef.current = false;
         pokeServer = false;
-        const s = await call<KioskState>("GET", `/api/state?client=${id}${claim}${poke}`);
+        const s = await call<KioskState>("GET", `/api/state?client=${id}${claim}${poke}${yt}`);
         if (alive) {
           setState(s);
           setOffline(false);
@@ -116,11 +123,13 @@ export function Kiosk({ envLabel }: { envLabel: string | null }) {
 
   // OAuth errors come back as ?spotify_error=…
   useEffect(() => {
-    const err = new URLSearchParams(location.search).get("spotify_error");
-    if (err) {
-      notify(`Spotify: ${err}`);
-      history.replaceState(null, "", "/");
-    }
+    const q = new URLSearchParams(location.search);
+    const err = q.get("spotify_error");
+    const ytErr = q.get("youtube_error");
+    if (err) notify(`Spotify: ${err}`);
+    if (ytErr) notify(`YouTube: ${ytErr}`);
+    if (q.get("youtube") === "connected") notify("YouTube connected");
+    if (err || ytErr || q.has("youtube")) history.replaceState(null, "", "/");
   }, [notify]);
 
   const clipVolume = state?.settings?.clipVolume;
@@ -199,7 +208,7 @@ export function Kiosk({ envLabel }: { envLabel: string | null }) {
   };
 
   if (!state) return <Splash>{offline ? "Can’t reach the kiosk server…" : "Loading…"}</Splash>;
-  if (state.locked) return <PinPad />;
+  if (state.locked) return <SignIn />;
   if (!state.spotify?.configured) return <SetupNeeded />;
   if (!connected)
     return (
@@ -263,7 +272,10 @@ export function Kiosk({ envLabel }: { envLabel: string | null }) {
       )}
 
       <header className="flex items-center justify-between px-4 pt-4 sm:px-6">
-        <div className="festive text-2xl">🎄 Music Kiosk 🎅</div>
+        <div className="flex items-center gap-2">
+          <div className="festive text-2xl">🎄 Music Kiosk 🎅</div>
+          <HealthLight state={state} offline={offline} sdk={sdk} />
+        </div>
         <nav className="hidden gap-1 sm:flex">
           {TABS.map((t) => (
             <button
@@ -281,6 +293,7 @@ export function Kiosk({ envLabel }: { envLabel: string | null }) {
 
       <main className="mx-auto grid w-full max-w-7xl flex-1 gap-4 px-4 pb-24 pt-4 sm:px-6 sm:pb-8 lg:grid-cols-[minmax(340px,420px)_1fr]">
         <div className="space-y-4">
+          <YouTubeStage state={state} notify={notify} />
           <NowPlaying state={state} notify={notify} sdkDeviceId={sdk.deviceId} />
           <div className="hidden lg:block">
             <UpNext state={state} notify={notify} />
@@ -353,39 +366,3 @@ function SetupNeeded() {
   );
 }
 
-function PinPad() {
-  const [pin, setPin] = useState("");
-  const [error, setError] = useState(false);
-  const submit = (p: string) =>
-    call("POST", "/api/unlock", { pin: p })
-      .then(() => location.reload())
-      .catch(() => {
-        setError(true);
-        setPin("");
-      });
-  const press = (d: string) => {
-    setError(false);
-    const next = (pin + d).slice(0, 8);
-    setPin(next);
-  };
-  return (
-    <Splash>
-      <div className="text-4xl">🔒</div>
-      <h1 className="mt-3 text-xl font-semibold">Enter kiosk PIN</h1>
-      <div className={`mt-4 h-8 font-mono text-2xl tracking-[0.5em] ${error ? "text-red-400" : ""}`}>
-        {pin.replace(/./g, "•") || (error ? "wrong" : "")}
-      </div>
-      <div className="mt-4 grid grid-cols-3 gap-3">
-        {["1", "2", "3", "4", "5", "6", "7", "8", "9", "⌫", "0", "OK"].map((k) => (
-          <button
-            key={k}
-            className="btn-round btn-round-lg text-xl"
-            onClick={() => (k === "⌫" ? setPin(pin.slice(0, -1)) : k === "OK" ? submit(pin) : press(k))}
-          >
-            {k}
-          </button>
-        ))}
-      </div>
-    </Splash>
-  );
-}

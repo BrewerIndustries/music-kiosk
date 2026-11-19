@@ -3,6 +3,10 @@ import { useState } from "react";
 import { call } from "@/lib/client";
 import { PlaylistPicker } from "./PlaylistPicker";
 import type { KioskState, Notify } from "./types";
+import { AccountSection, UsersSection } from "./Account";
+import { DoNotPlaySection } from "./DoNotPlay";
+import { EventSection } from "./EventSection";
+import { KioskPlaylistsSection } from "./KioskPlaylists";
 
 export function SettingsPanel({
   state,
@@ -36,6 +40,8 @@ export function SettingsPanel({
         </p>
         <PlaylistPicker currentUri={s?.playlistUri ?? null} notify={notify} onPick={pickPlaylist} maxHeight="max-h-72" />
       </section>
+
+      <KioskPlaylistsSection state={state} notify={notify} />
 
       <section className="card space-y-4 p-4 text-sm">
         <h2 className="section-title">Music</h2>
@@ -100,6 +106,8 @@ export function SettingsPanel({
         </div>
       </section>
 
+      <DoNotPlaySection state={state} notify={notify} />
+
       <section className="card space-y-3 p-4 text-sm">
         <h2 className="section-title">Guest link</h2>
         <p className="text-xs text-muted">
@@ -115,6 +123,8 @@ export function SettingsPanel({
           <button className="btn" onClick={() => save({ guestBaseUrl: guestBase })}>Save</button>
         </div>
       </section>
+
+      <EventSection notify={notify} />
 
       <section className="card p-4 text-sm">
         <div className="flex items-center justify-between">
@@ -171,13 +181,60 @@ export function SettingsPanel({
           >
             Disconnect Spotify
           </button>
-          {state.pinRequired && (
-            <button className="btn" onClick={() => call("DELETE", "/api/unlock").then(() => location.reload())}>
-              Lock this device
-            </button>
-          )}
         </div>
       </section>
+
+      <section className="card space-y-3 p-4 text-sm">
+        <h2 className="section-title">YouTube</h2>
+        {!state.youtube?.configured ? (
+          <p className="text-xs text-muted">
+            Not set up yet: needs a Google OAuth client (<code>GOOGLE_CLIENT_ID</code> /{" "}
+            <code>GOOGLE_CLIENT_SECRET</code>) on the server.
+          </p>
+        ) : state.youtube.connected ? (
+          <>
+            <div>
+              Signed in as{" "}
+              <span className="font-semibold">{state.youtube.user?.name ?? state.youtube.user?.email ?? "your Google account"}</span>
+            </div>
+            <label className="flex items-center justify-between gap-4">
+              <span>
+                YouTube on the kiosk
+                <span className="block text-xs text-muted">
+                  Adds a YouTube tab to search: songs and your playlists (incl. YouTube Music). YouTube songs play
+                  on the kiosk screen while Spotify waits. Off = Spotify only.
+                </span>
+              </span>
+              <input
+                type="checkbox"
+                className="h-5 w-5 accent-[var(--accent)]"
+                checked={s?.youtubeEnabled ?? false}
+                onChange={(e) => save({ youtubeEnabled: e.target.checked })}
+              />
+            </label>
+            <button
+              className="btn"
+              onClick={() =>
+                confirm("Disconnect YouTube?") && call("POST", "/api/youtube/logout").catch((e) => notify(e.message))
+              }
+            >
+              Disconnect YouTube
+            </button>
+          </>
+        ) : (
+          <>
+            <p className="text-xs text-muted">
+              Sign in with the Google account whose YouTube / YouTube Music playlists you want (read-only).
+            </p>
+            <a href="/api/youtube/login" className="btn btn-primary inline-flex">
+              Connect YouTube
+            </a>
+          </>
+        )}
+      </section>
+
+      <AccountSection state={state} notify={notify} />
+      <UsersSection state={state} notify={notify} />
     </div>
   );
 }

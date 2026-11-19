@@ -6,21 +6,26 @@ export function UpNext({ state, notify }: { state: KioskState; notify: Notify })
   const items = state.upNext ?? [];
   const upcoming = state.upcoming ?? [];
   const ctx = state.playback?.contextUri;
-  const fromName = ctx && ctx === state.settings?.playlistUri ? state.settings?.playlistName : null;
+  const kioskBackdrop = state.backdropKind === "kiosk";
+  const fromName = kioskBackdrop || (ctx && ctx === state.settings?.playlistUri) ? state.settings?.playlistName : null;
   const patch = (id: string, action: string) =>
     call("PATCH", `/api/queue/${id}`, { action }).catch((e) => notify(e.message));
   const remove = (id: string) => call("DELETE", `/api/queue/${id}`).catch((e) => notify(e.message));
   const history = state.history ?? [];
   // Put a song (from the history or the playlist) into Up Next: first, or playing now.
-  const enqueue = (t: TrackSummary, how: "top" | "playNow") => {
-    if (how === "playNow") expect({ track: t, playing: true });
+  const enqueue = (t: TrackSummary & { requestedBy?: string | null; dedication?: string | null }, how: "top" | "playNow") => {
+    const youtube = t.uri.startsWith("youtube:");
+    if (how === "playNow" && !youtube) expect({ track: t, playing: true });
     return call("POST", "/api/queue", {
-      kind: "track",
+      kind: youtube ? "youtube" : "track",
       uri: t.uri,
       title: t.title,
       subtitle: t.subtitle,
       art: t.art,
       durationMs: t.durationMs,
+      // A replay from Previously played keeps who asked for it and their dedication.
+      requestedBy: t.requestedBy ?? undefined,
+      dedication: t.dedication ?? undefined,
       [how]: true,
     })
       .then(() => notify(how === "playNow" ? `Playing “${t.title}”` : `“${t.title}” is up next`))
@@ -30,6 +35,7 @@ export function UpNext({ state, notify }: { state: KioskState; notify: Notify })
       });
   };
 
+  const firstQueued = items.findIndex((i) => i.status === "queued");
   return (
     <section className="card p-4">
       {history.length > 0 && (
@@ -65,8 +71,9 @@ export function UpNext({ state, notify }: { state: KioskState; notify: Notify })
             <Row
               key={it.id}
               item={it}
-              first={i === 0}
+              first={i === firstQueued}
               last={i === items.length - 1}
+              onTop={() => patch(it.id, "top")}
               onUp={() => patch(it.id, "up")}
               onDown={() => patch(it.id, "down")}
               onPlayNow={() => {
@@ -98,6 +105,8 @@ export function UpNext({ state, notify }: { state: KioskState; notify: Notify })
                 key={`${t.uri}-${i}`}
                 track={t}
                 onPlay={() => {
+                  // A kiosk playlist's songs aren't in Spotify's queue: queue it to play now.
+                  if (kioskBackdrop) return enqueue(t, "playNow");
                   expect({ track: t, playing: true });
                   return call("POST", "/api/player", { action: "skipTo", uri: t.uri, index: i })
                     .then(() => notify(`Playing “${t.title}”`))
@@ -106,7 +115,7 @@ export function UpNext({ state, notify }: { state: KioskState; notify: Notify })
                       notify(e.message);
                     });
                 }}
-                onCue={() => {
+                onCue={kioskBackdrop ? undefined : () => {
                   expect({ track: t, playing: false });
                   return call("POST", "/api/player", { action: "skipTo", uri: t.uri, index: i, paused: true })
                     .then(() => notify(`“${t.title}” is loaded — press ▶ when ready`))
@@ -136,7 +145,7 @@ function PlaylistRow({
   onCue,
   onTop,
 }: {
-  track: TrackSummary;
+  track: TrackSummary & { requestedBy?: string | null; dedication?: string | null };
   onPlay: () => void;
   onCue?: () => void;
   onTop: () => void;
@@ -149,12 +158,24 @@ function PlaylistRow({
         className="group flex min-w-0 flex-1 items-center gap-3 px-2 py-1 text-left"
       >
         <div className="art relative h-9 w-9 shrink-0 text-sm">
-          {track.art ? <img src={track.art} alt="" className="h-full w-full object-cover" /> : <span>♪</span>}
+          {track.art ? <img src={track.art} alt="" className="h-full w-full object-cover" /> : <span>{track.uri.startsWith("youtube:") ? "▶" : "♪"}</span>}
           <span className="absolute inset-0 hidden items-center justify-center bg-black/50 text-white group-hover:flex">▶</span>
         </div>
         <div className="min-w-0 flex-1">
-          <div className="truncate text-sm">{track.title}</div>
-          <div className="truncate text-xs text-muted">{track.subtitle}</div>
+          <div className={`truncate text-sm ${track.blocked ? "line-through opacity-60" : ""}`}>
+            {track.blocked && <span title="On the do-not-play list: it will be skipped">🚫 </span>}
+            {track.title}
+          </div>
+          <div className="truncate text-xs text-muted">
+            {track.uri.startsWith("youtube:") && <span className="mr-1 rounded bg-red-600/80 px-1 text-[10px] font-semibold text-white">YouTube</span>}
+            {track.subtitle}
+          </div>
+          {(track.requestedBy || track.dedication) && (
+            <div className="truncate text-xs text-muted">
+              {track.requestedBy && <span>🎁 {track.requestedBy}</span>}
+              {track.dedication && <span className="ml-1 italic">💌 “{track.dedication}”</span>}
+            </div>
+          )}
         </div>
         <span className="shrink-0 text-xs tabular-nums text-muted">{fmtTime(track.durationMs)}</span>
       </button>
@@ -171,6 +192,7 @@ function Row({
   item,
   first,
   last,
+  onTop,
   onUp,
   onDown,
   onPlayNow,
@@ -179,6 +201,7 @@ function Row({
   item: QueueItem;
   first: boolean;
   last: boolean;
+  onTop: () => void;
   onUp: () => void;
   onDown: () => void;
   onPlayNow: () => void;
@@ -194,7 +217,7 @@ function Row({
         className="group flex min-w-0 flex-1 items-center gap-3 text-left disabled:opacity-100"
       >
         <div className="art relative h-10 w-10 shrink-0 text-base">
-          {item.art ? <img src={item.art} alt="" className="h-full w-full object-cover" /> : <span>{item.kind === "clip" ? "🔊" : "♪"}</span>}
+          {item.art ? <img src={item.art} alt="" className="h-full w-full object-cover" /> : <span>{item.kind === "clip" ? "🔊" : item.kind === "youtube" ? "▶" : "♪"}</span>}
           {!locked && (
             <span className="absolute inset-0 hidden items-center justify-center bg-black/50 text-white group-hover:flex">▶</span>
           )}
@@ -202,17 +225,21 @@ function Row({
         <div className="min-w-0 flex-1">
           <div className="truncate text-sm font-medium">{item.title}</div>
           <div className="truncate text-xs text-muted">
+            {item.kind === "youtube" && <span className="mr-1 rounded bg-red-600/80 px-1 text-[10px] font-semibold text-white">YouTube</span>}
             {item.kind === "clip" ? "Sound clip" : item.subtitle}
             {item.requestedBy ? ` · ${item.requestedBy}` : ""}
+            {item.source === "backdrop" ? " · from the playlist" : ""}
             {item.durationMs ? ` · ${fmtTime(item.durationMs)}` : ""}
           </div>
+          {item.dedication && <div className="truncate text-xs italic text-gold">💌 “{item.dedication}”</div>}
         </div>
       </button>
       {locked ? (
-        <span className="text-xs text-accent">{item.kind === "clip" ? "playing" : "next"}</span>
+        <span className="text-xs text-accent">{item.kind === "track" ? "next" : "playing"}</span>
       ) : (
         <div className="flex shrink-0 items-center gap-1">
           <button className="icon-btn" aria-label="Play now" title="Play now" onClick={onPlayNow}>▶</button>
+          <button className="icon-btn" aria-label="Move to top" title="Move to the top of Up Next" disabled={first} onClick={onTop}>⇈</button>
           <button className="icon-btn" aria-label="Move up" disabled={first} onClick={onUp}>↑</button>
           <button className="icon-btn" aria-label="Move down" disabled={last} onClick={onDown}>↓</button>
           <button className="icon-btn" aria-label="Remove" onClick={onRemove}>✕</button>

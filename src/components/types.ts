@@ -8,8 +8,9 @@ export type { QueueItem, KioskSettings, SpDevice, TrackSummary };
 
 export type KioskState = {
   locked: boolean;
-  pinRequired: boolean;
+  me?: { id: string; email: string; name: string; role: "admin" | "member" } | null;
   spotify?: { configured: boolean; connected: boolean; user: { name?: string; product?: string } | null };
+  youtube?: { configured: boolean; connected: boolean; user: { name?: string; email?: string } | null };
   error?: string | null;
   playback?: {
     isPlaying: boolean;
@@ -21,18 +22,22 @@ export type KioskState = {
     shuffle: boolean;
   } | null;
   nowPlayingItem?: QueueItem | null;
+  youtubeNow?: (QueueItem & { startedAt: number }) | null;
+  audioHostAlive?: boolean;
+  backdropKind?: "kiosk" | "spotify"; // kiosk: the backdrop is a kiosk playlist (Spotify + YouTube)
+  youtubeHeld?: boolean; // Spotify took over: the kiosk tab pauses the YouTube song
   ducked?: boolean;
   fading?: boolean;
   holdActive?: boolean;
   resumeOffer?: { pref: string; uri: string; deviceId: string | null; deviceName: string | null } | null;
   musicVolume?: number | null;
   upcoming?: TrackSummary[];
-  history?: (TrackSummary & { playedAt: string })[];
+  history?: (TrackSummary & { playedAt: string; requestedBy?: string | null; dedication?: string | null })[];
   errors?: LoggedError[];
   upNext?: QueueItem[];
   pending?: QueueItem[];
   recent?: QueueItem[];
-  clip?: QueueItem | null;
+  clip?: (QueueItem & { startMs?: number }) | null; // startMs: pick a YouTube song back up there
   isAudioHost?: boolean;
   settings?: KioskSettings;
 };

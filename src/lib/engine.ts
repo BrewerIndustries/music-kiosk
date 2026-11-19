@@ -2,14 +2,16 @@
 // playback, asks engine-core's decide() what to do, and does it. The kiosk UI reads
 // the cached snapshot from here instead of hitting Spotify itself.
 import { api, getPlayback, isConnected, summarize, SpotifyError, type SpPlayback, type SpTrack, type TrackSummary } from "./spotify";
-import { decide, initialMemory, type Memory } from "./engine-core";
+import { CLIP_CUT_MS, decide, initialMemory, type Memory } from "./engine-core";
 import { logError, recentErrors } from "./log";
-import { getSettings, updateSettings } from "./settings";
-import { getItem, head, moveToFront, setStatus, upNext, type QueueItem } from "./queue";
+import { getSettings, isBlocked, updateSettings } from "./settings";
+import { addItem, clearBackdropItems, getItem, head, moveToFront, playsInBrowser, setStatus, upNext, type QueueItem } from "./queue";
+import { kioskPlaylistId, nextFromPlaylist, resetCursor, upcomingFromPlaylist, type KioskPlaylistItem } from "./kioskPlaylists";
 import { getSetting, setSetting } from "./db";
-import { notePlaying, playHistory } from "./history";
+import { notePlayed, notePlaying, playHistory } from "./history";
 
 const CLIP_TIMEOUT_MS = 5 * 60_000; // give up on a queued clip the browser never finished
+const YOUTUBE_GRACE_MS = 3 * 60_000; // …or a YouTube song this long after it should have ended
 const HOST_STALE_MS = 10_000; // a kiosk tab that hasn't polled in this long can't play clips
 const UPCOMING_REFRESH_MS = 15_000; // re-read Spotify's upcoming list at least this often
 const UPCOMING_SHOWN = 10;
@@ -17,6 +19,8 @@ const DUCK_WATCHDOG_MS = 3 * 60_000; // restore the volume if a duck is somehow 
 const VOLUME_SYNC_QUIET_MS = 6000;
 const RESUME_MAX_AGE_MS = 6 * 60 * 60_000; // offer to resume playback lost up to 6 h ago
 const FADE_STEP_MS = 200;
+const IDLE_POLL_MS = 60_000; // engine poll with nothing playing and no kiosk page open
+const STALE_SNAPSHOT_MS = 2500; // a polling page wakes the engine if its data is older
 
 type EngineState = {
   started: boolean;
@@ -35,6 +39,9 @@ type EngineState = {
   // music-volume setting from the device right after our own change.
   volumeSetAt: number;
   pausedForInstant: { holders: number } | null;
+  // Spotify was started over a YouTube song: the id of that song, which the kiosk
+  // tab pauses (snapshot.youtubeHeld) until its own ▶ takes over again.
+  youtubeHeld: string | null;
   // What Spotify will play after the current track (playlist order, shuffle and
   // repeat included), minus our own handed-off track. Shown under Up Next.
   upcoming: TrackSummary[];
@@ -42,6 +49,10 @@ type EngineState = {
   upcomingForUri: string | null;
   upcomingStale: boolean;
   burstUntil: number;
+  ticking: boolean;
+  // The do-not-play song we last skipped (skip each one once, never loop on it).
+  skippedBlocked: string | null;
+  tickAgain: boolean;
   // A music fade in progress (bumping the token cancels it).
   fadeToken: number;
   fading: boolean;
@@ -50,6 +61,11 @@ type EngineState = {
   // is the song whose ending we've already handled.
   transitioning: boolean;
   transitionFor: string | null;
+  // Where the backdrop playlist was when "Play now" cut in (the song it would have
+  // played next). Spotify can lose its place when a song from the playlist (e.g. a
+  // replay from Previously played) is played out of turn, so once Up Next runs dry
+  // the music goes back here instead of to whatever followed the replayed song.
+  returnTo: { context: string; uri: string } | null;
 };
 
 const g = globalThis as unknown as { _kioskEngine?: EngineState; _kioskTick?: () => Promise<void> };
@@ -66,16 +82,21 @@ function freshState(): EngineState {
     duck: null,
     volumeSetAt: 0,
     pausedForInstant: null,
+    youtubeHeld: null,
+    skippedBlocked: null,
     upcoming: [],
     upcomingAt: 0,
     upcomingForUri: null,
     upcomingStale: true,
     burstUntil: 0,
+    ticking: false,
+    tickAgain: false,
     fadeToken: 0,
     fading: false,
     fadingSince: 0,
     transitioning: false,
     transitionFor: null,
+    returnTo: null,
   };
 }
 
@@ -107,6 +128,34 @@ export function ensureEngine() {
 const HOLD_DUCK = "hold_duck";
 const HOLD_PAUSED = "hold_paused";
 const HOLD_TRANSITION = "hold_transition"; // music volume lowered for a song transition
+const LAST_DEVICE = "last_device"; // the Spotify player last seen (to wake it again)
+// The YouTube song in progress ({id, resume}) and where the kiosk tab last saw it
+// ({uri, ms, at}), so a deploy (server restart) or a kiosk reload picks it back up
+// at the same spot instead of dropping it.
+const YT_CLIP = "youtube_clip";
+const YT_POS = "youtube_pos";
+
+function readJson<T>(key: string): T | null {
+  try {
+    return JSON.parse(getSetting(key) ?? "null") as T | null;
+  } catch {
+    return null;
+  }
+}
+function saveYouTubeClip() {
+  const c = state().memory.clip;
+  if (c && getItem(c.id)?.kind === "youtube") setSetting(YT_CLIP, JSON.stringify({ id: c.id, resume: Boolean(c.resume) }));
+}
+
+// The kiosk tab's YouTube position, reported on its state poll.
+export function noteYouTubePosition(videoUri: string, ms: number) {
+  if (Number.isFinite(ms) && ms >= 0) setSetting(YT_POS, JSON.stringify({ uri: videoUri, ms: Math.round(ms), at: Date.now() }));
+}
+// Where to start the current YouTube song (0 unless it was cut off part-way).
+export function youtubeResumeMs(item: QueueItem | null): number {
+  const pos = readJson<{ uri: string; ms: number }>(YT_POS);
+  return item?.kind === "youtube" && pos?.uri === item.uri ? pos.ms : 0;
+}
 
 function recoverAfterRestart() {
   const s = state();
@@ -114,10 +163,21 @@ function recoverAfterRestart() {
   const handed = upNext().filter((i) => i.status === "handed_off");
   const track = handed.find((i) => i.kind === "track" && i.uri);
   if (track) s.memory = { ...s.memory, handoff: { id: track.id, uri: track.uri!, trackChanges: 0 } };
-  // A queued clip that was mid-play: it's gone; let the music carry on.
-  for (const c of handed.filter((i) => i.kind === "clip")) setStatus(c.id, "played");
+  // A YouTube song that was mid-play (e.g. a deploy restarted us): carry on with it
+  // where the kiosk tab last saw it; Spotify stays paused for it.
+  const yt = handed.find((i) => i.kind === "youtube");
+  if (yt) {
+    const saved = readJson<{ id: string; resume: boolean }>(YT_CLIP);
+    s.memory = {
+      ...s.memory,
+      clip: { id: yt.id, startedAt: Date.now() - youtubeResumeMs(yt), resume: saved?.id === yt.id && saved.resume },
+    };
+  }
+  // A queued sound clip that was mid-play: it's gone; let the music carry on.
+  const clips = handed.filter((i) => playsInBrowser(i.kind) && i.id !== yt?.id);
+  for (const c of clips) setStatus(c.id, "played");
   // Music left lowered or paused for a clip: bring it back once we can talk to Spotify.
-  if (getSetting(HOLD_DUCK) || getSetting(HOLD_PAUSED) || getSetting(HOLD_TRANSITION) || handed.some((i) => i.kind === "clip"))
+  if (getSetting(HOLD_DUCK) || getSetting(HOLD_PAUSED) || getSetting(HOLD_TRANSITION) || clips.length)
     setTimeout(() => releaseHolds().catch((e) => logError("engine", e, "restoring music after restart")), 1500);
 }
 
@@ -227,6 +287,9 @@ export function resumeOffer() {
   const point = resumePoint();
   if (!point?.playing) return null;
   if (s.playback?.is_playing) return null;
+  // Spotify waits paused while a YouTube song (or queued clip) has the floor, even
+  // when that song is paused on the kiosk screen: the music hasn't "stopped".
+  if (s.memory.clip) return null;
   const dev = s.playback?.device;
   return { pref: pref ?? "browser", uri: point.uri, deviceId: dev?.id ?? null, deviceName: dev?.name ?? null };
 }
@@ -280,6 +343,7 @@ export async function resumeOn(deviceId?: string) {
 // playing: Spotify can only load by playing, so mute, start, pause at 0:00, and
 // put the volume back.
 export async function startPlaylist(uri: string, deviceId: string | undefined, paused: boolean) {
+  forgetPlace();
   const dev = { device_id: deviceId };
   if (paused) await api("PUT", "/me/player/volume", undefined, { volume_percent: "0", ...dev }).catch(() => {});
   try {
@@ -324,14 +388,57 @@ export function poke() {
   schedule(50);
 }
 
+// On Cloudflare the loop runs on Durable Object alarms (they wake the object even
+// when no kiosk page is open); elsewhere (tests) on setTimeout. Either way only
+// one wake-up is pending at a time — a new schedule() replaces it.
+let alarmScheduler: ((at: number) => void) | null = null;
+export function attachAlarms(set: (at: number) => void) {
+  alarmScheduler = set;
+}
+
 function schedule(ms: number) {
   const s = state();
+  if (alarmScheduler) {
+    alarmScheduler(Date.now() + ms);
+    return;
+  }
   if (s.timer) clearTimeout(s.timer);
   // Call through globalThis so a hot-reloaded module's tick takes over the loop.
   s.timer = setTimeout(() => g._kioskTick?.(), ms);
 }
 
+// The alarm handler.
+export function runTick() {
+  return g._kioskTick?.() ?? Promise.resolve();
+}
+
+// A kiosk page is polling: make sure what it sees is fresh even if the loop has
+// backed off (nothing playing, nobody watching).
+export function freshen() {
+  const s = state();
+  if (!s.ticking && Date.now() - s.playbackAt > STALE_SNAPSHOT_MS) schedule(0);
+}
+
+// Never two ticks at once: a wake-up that lands mid-tick runs right after it.
 async function tick() {
+  const s = state();
+  if (s.ticking) {
+    s.tickAgain = true;
+    return;
+  }
+  s.ticking = true;
+  try {
+    await tickBody();
+  } finally {
+    s.ticking = false;
+    if (s.tickAgain) {
+      s.tickAgain = false;
+      schedule(0);
+    }
+  }
+}
+
+async function tickBody() {
   const s = state();
   let delay = 5000;
   try {
@@ -341,15 +448,32 @@ async function tick() {
     } else {
       s.playback = await getPlayback();
       s.playbackAt = Date.now();
+      // The player to wake if Spotify drops it while it waits (wakeSpotify).
+      const devId = s.playback?.device?.id;
+      if (devId && devId !== getSetting(LAST_DEVICE)) setSetting(LAST_DEVICE, devId);
       s.error = null;
       // Only remember *playing* moments: when a browser player dies (its tab reloaded),
       // Spotify reports the song as paused on the dead device, which must not read as
       // "someone stopped the music". Deliberate stops go through markStopped().
       if (s.playback?.item) saveResumePoint(s.playback);
-      if (s.playback?.item) notePlaying(summarize(s.playback.item), s.playback.progress_ms ?? 0);
+      if (s.playback?.item) {
+        const it = s.memory.nowPlayingId ? getItem(s.memory.nowPlayingId) : null;
+        const info = it?.uri === s.playback.item.uri ? requestInfo(it) : undefined;
+        notePlaying(summarize(s.playback.item), s.playback.progress_ms ?? 0, info);
+      }
+      // A do-not-play song came up (from the playlist, or the Spotify app): skip it.
+      if (s.playback?.is_playing && s.playback.item && s.skippedBlocked !== s.playback.item.uri) {
+        const hit = isBlocked(summarize(s.playback.item));
+        if (hit) {
+          s.skippedBlocked = s.playback.item.uri;
+          await api("POST", "/me/player/next").catch((e) => logError("engine", e, "skipping a do-not-play song"));
+        }
+      }
 
+      feedBackdrop();
       const pb = s.playback;
       const h = head();
+      const prevUri = s.memory.lastUri;
       const decision = decide(
         pb?.item
           ? {
@@ -364,6 +488,8 @@ async function tick() {
       );
       s.memory = decision.memory;
       delay = decision.delayMs;
+      // Spotify waits paused through a whole YouTube song; no need to watch it closely.
+      if (s.memory.clip && getItem(s.memory.clip.id)?.kind === "youtube") delay = Math.max(delay, 2000);
 
       for (const a of decision.actions) {
         if (a.type === "enqueue") {
@@ -373,11 +499,34 @@ async function tick() {
         } else if (a.type === "pauseForClip") {
           await api("PUT", "/me/player/pause");
           setStatus(a.id, "handed_off");
+          saveYouTubeClip();
           if (!hostAlive()) await finishClip(a.id); // nobody to play it: skip it
         }
       }
 
-      if (s.memory.clip && Date.now() - s.memory.clip.startedAt > CLIP_TIMEOUT_MS) await finishClip(s.memory.clip.id);
+      if (s.memory.clip && clipOverdue(s.memory.clip)) await finishClip(s.memory.clip.id);
+
+      // An Up Next song (e.g. a replay) is about to end with nothing else queued: jump
+      // straight to the playlist's remembered place, so Spotify never starts the song
+      // that follows it in the playlist. backToPlace() is the fallback if this misses.
+      if (
+        s.returnTo &&
+        pb?.item &&
+        pb.is_playing &&
+        s.memory.nowPlayingId &&
+        !s.memory.handoff &&
+        !s.memory.clip &&
+        !head() &&
+        pb.item.uri !== s.returnTo.uri &&
+        pb.item.duration_ms - (pb.progress_ms ?? 0) <= CLIP_CUT_MS
+      ) {
+        const back = s.returnTo;
+        s.returnTo = null;
+        await api("PUT", "/me/player/play", { context_uri: back.context, offset: { uri: back.uri } }).catch((e) =>
+          logError("engine", e, "returning to the playlist's place"),
+        );
+        s.upcomingStale = true;
+      } else if (s.returnTo && pb?.item && prevUri && pb.item.uri !== prevUri && !s.memory.clip) await backToPlace(pb);
 
       await volumeHousekeeping();
       delay = maybeTransition(delay);
@@ -394,6 +543,8 @@ async function tick() {
     delay = e instanceof SpotifyError && e.status === 429 ? 10_000 : 3000;
   }
   if (Date.now() < (s.burstUntil ?? 0)) delay = Math.min(delay, BURST_POLL_MS);
+  // Nothing playing and no kiosk page open: check in once a minute instead.
+  else if (!s.playback?.is_playing && !s.memory.clip && !hostAlive()) delay = Math.max(delay, IDLE_POLL_MS);
   schedule(delay);
 }
 
@@ -402,6 +553,12 @@ async function refreshUpcoming(currentUri: string | null) {
   s.upcomingStale = false;
   s.upcomingAt = Date.now();
   s.upcomingForUri = currentUri;
+  // A kiosk-playlist backdrop: what it plays next comes from the kiosk, not Spotify.
+  const pid = kioskBackdrop();
+  if (pid) {
+    s.upcoming = upcomingFromPlaylist(pid, UPCOMING_SHOWN, blockedItem).map(asSummary);
+    return;
+  }
   if (!currentUri) {
     s.upcoming = [];
     return;
@@ -420,12 +577,12 @@ g._kioskTick = tick;
 // duplicate send means the song plays twice: mark it handed off FIRST, and only undo
 // that when Spotify definitely refused it (4xx). On an ambiguous failure (network,
 // 5xx) assume it went through rather than risk queueing it again.
-async function handOff(id: string, uri: string) {
+async function handOff(id: string, uri: string, deviceId?: string) {
   const s = state();
   setStatus(id, "handed_off");
   s.memory = { ...s.memory, handoff: { id, uri, trackChanges: 0 } };
   try {
-    await api("POST", "/me/player/queue", undefined, { uri });
+    await api("POST", "/me/player/queue", undefined, { uri, device_id: deviceId });
   } catch (e) {
     if (e instanceof SpotifyError && e.status >= 400 && e.status < 500) {
       setStatus(id, "queued");
@@ -455,18 +612,244 @@ export function activeClip(): QueueItem | null {
   return c ? getItem(c.id) : null;
 }
 
-// The browser finished (or skipped) a queued clip: move on to the next thing.
+function youtubeNow() {
+  const c = state().memory.clip;
+  const item = c ? getItem(c.id) : null;
+  return item?.kind === "youtube" ? { ...item, startedAt: c!.startedAt } : null;
+}
+
+// Only one player at a time. Something is starting Spotify (▶, fade in, Resume…)
+// while a YouTube song has the floor: the kiosk tab pauses the video, and when the
+// YouTube song finishes Spotify just carries on with its current song.
+export function holdYouTube() {
+  const s = state();
+  const c = s.memory.clip;
+  if (!c || getItem(c.id)?.kind !== "youtube") return;
+  s.memory = { ...s.memory, clip: { ...c, resume: true } };
+  saveYouTubeClip();
+  s.youtubeHeld = c.id;
+  poke();
+}
+
+// The YouTube song's own ▶ on the kiosk screen: it takes the floor back, so pause
+// Spotify (not a deliberate stop: it picks up again after the YouTube song).
+export async function youtubeResumed() {
+  const s = state();
+  s.youtubeHeld = null;
+  const pb = await getPlayback().catch(() => null);
+  if (pb?.is_playing) await api("PUT", "/me/player/pause");
+  poke();
+}
+
+// ⏭ while the kiosk tab plays a clip / YouTube song skips that, not Spotify.
+export async function skipCurrent() {
+  const s = state();
+  const c = s.memory.clip;
+  if (c) return finishClip(c.id);
+  // A kiosk-playlist backdrop: Spotify's queue is empty until the engine hands the
+  // next song over near the end, so play that song ourselves.
+  if (kioskBackdrop() && !s.memory.handoff) {
+    feedBackdrop();
+    const h = head();
+    if (h?.kind === "track" && h.uri) {
+      await playTrackDirect(h, s.playback?.device?.id ?? undefined);
+      return poke();
+    }
+    if (h && playsInBrowser(h.kind)) {
+      await api("PUT", "/me/player/pause").catch(() => {});
+      await startInBrowser(h.id);
+      return poke();
+    }
+  }
+  // Skip goes to the top of Up Next (Spotify's own "next" only knows the playlist),
+  // else back to where the playlist was before a "Play now".
+  const h = head();
+  if (h && !s.memory.handoff) {
+    if (h.kind === "track" && h.uri) {
+      await handOff(h.id, h.uri);
+      await api("POST", "/me/player/next");
+      return poke();
+    }
+    if (playsInBrowser(h.kind)) {
+      await api("PUT", "/me/player/pause").catch(() => {});
+      await startInBrowser(h.id);
+      return poke();
+    }
+  }
+  if (!s.memory.handoff && s.returnTo) {
+    const back = s.returnTo;
+    s.returnTo = null;
+    try {
+      await api("PUT", "/me/player/play", { context_uri: back.context, offset: { uri: back.uri } });
+      return poke();
+    } catch (e) {
+      logError("engine", e, "returning to the playlist's place");
+    }
+  }
+  await api("POST", "/me/player/next");
+}
+
+// "Play now" is about to cut in: remember the playlist song that was due next.
+function rememberPlace() {
+  const s = state();
+  if (s.returnTo || kioskBackdrop()) return;
+  const ctx = s.playback?.context?.uri;
+  const next = s.upcoming[0]?.uri;
+  if (ctx?.startsWith("spotify:playlist:") && next && s.upcomingForUri === (s.playback?.item?.uri ?? null))
+    s.returnTo = { context: ctx, uri: next };
+}
+
+// The song changed while a place is remembered. An Up Next song (or the remembered
+// song itself) is fine; anything else means Spotify carried on from the wrong spot.
+async function backToPlace(pb: SpPlayback) {
+  const s = state();
+  const back = s.returnTo!;
+  const uri = pb.item!.uri;
+  if (uri === back.uri) {
+    s.returnTo = null;
+    return;
+  }
+  if (s.memory.nowPlayingId || s.memory.handoff) return; // Up Next is still playing out
+  // Someone picked a different playlist in the Spotify app: forget the old place.
+  if (pb.context?.uri && pb.context.uri !== back.context) {
+    s.returnTo = null;
+    return;
+  }
+  s.returnTo = null;
+  await api("PUT", "/me/player/play", { context_uri: back.context, offset: { uri: back.uri } }).catch((e) =>
+    logError("engine", e, "returning to the playlist's place"),
+  );
+  s.upcomingStale = true;
+}
+
+// A deliberate jump (another playlist, a song from "Then from…", ⏮): the old place no longer applies.
+export function forgetPlace() {
+  state().returnTo = null;
+}
+
+// A browser-played item that never reported back (tab closed, player stuck).
+function clipOverdue(c: { id: string; startedAt: number }) {
+  const item = getItem(c.id);
+  const limit = item?.kind === "youtube" ? item.durationMs + YOUTUBE_GRACE_MS : CLIP_TIMEOUT_MS;
+  return Date.now() - c.startedAt > limit;
+}
+
+// Hand a clip / YouTube song to the audio host (Spotify is already paused).
+async function startInBrowser(id: string, resume = false) {
+  const s = state();
+  setStatus(id, "handed_off");
+  s.memory = { ...s.memory, clip: { id, startedAt: Date.now(), resume } };
+  saveYouTubeClip();
+  if (!hostAlive()) await finishClip(id); // nobody to play it: skip it
+}
+
+// Spotify drops a player that sits paused for a few minutes (e.g. through a run of
+// YouTube songs), and then every command fails with "no active device". Before
+// handing back to Spotify: if nothing is active, re-attach the last player (paused,
+// keeping its place); if Spotify has forgotten the session, rebuild it from the
+// saved resume point. Returns the player to address commands to.
+export async function wakeSpotify(): Promise<string | undefined> {
+  const pb = await getPlayback().catch(() => null);
+  if (pb?.device?.is_active && pb.device.id) return pb.device.id;
+  let id = pb?.device?.id ?? getSetting(LAST_DEVICE) ?? undefined;
+  if (!id) {
+    const { devices } = (await api<{ devices: { id: string | null; name: string }[] }>("GET", "/me/player/devices").catch(
+      () => null,
+    )) ?? { devices: [] };
+    id = devices.find((d) => d.id && d.name.startsWith("Music Kiosk"))?.id ?? devices.find((d) => d.id)?.id ?? undefined;
+  }
+  if (!id) return undefined;
+  try {
+    await api("PUT", "/me/player", { device_ids: [id], play: false });
+    await new Promise((r) => setTimeout(r, 700));
+    if ((await getPlayback().catch(() => null))?.item) return id;
+  } catch (e) {
+    logError("engine", e, "waking Spotify after YouTube/clip");
+  }
+  const point = resumePoint();
+  if (point) {
+    const body = point.contextUri
+      ? { context_uri: point.contextUri, offset: { uri: point.uri }, position_ms: point.progressMs }
+      : { uris: [point.uri], position_ms: point.progressMs };
+    await api("PUT", "/me/player/play", body, { device_id: id }).catch((e) => logError("engine", e, "rebuilding Spotify session"));
+  }
+  return id;
+}
+
+// The browser finished (or skipped) a queued clip / YouTube song: move on.
+// A different song is starting right now (Play now, a playlist, …): the clip /
+// YouTube song in the kiosk tab is over. It counts as played; the kiosk tab sees
+// the clip gone and stops its player. Returns whether there was one.
+export function dropBrowserItem(): boolean {
+  const s = state();
+  const c = s.memory.clip;
+  if (!c) return false;
+  setStatus(c.id, "played");
+  s.memory = { ...s.memory, clip: null };
+  s.youtubeHeld = null;
+  setSetting(YT_CLIP, null);
+  setSetting(YT_POS, null);
+  return true;
+}
+
 export async function finishClip(id: string) {
   const s = state();
-  if (s.memory.clip?.id !== id) return;
+  if (s.memory.clip?.id !== id) {
+    // Late word about an item we already moved past: make sure it isn't left
+    // "playing" (a restart would otherwise pick it back up).
+    const stale = getItem(id);
+    if (stale && playsInBrowser(stale.kind) && stale.status === "handed_off") setStatus(id, "played");
+    return;
+  }
+  const resume = Boolean(s.memory.clip.resume);
+  s.youtubeHeld = null;
+  const item = getItem(id);
+  // Previously played: a YouTube song that got going (≥ 10 s) counts, like Spotify's.
+  if (item?.kind === "youtube" && item.uri) {
+    const heard = Math.max(youtubeResumeMs(item), Date.now() - s.memory.clip.startedAt);
+    if (heard >= 10_000)
+      notePlayed(
+        { uri: item.uri, title: item.title, subtitle: item.subtitle, art: item.art, durationMs: item.durationMs, explicit: false },
+        heard,
+        s.memory.clip.startedAt,
+        requestInfo(item),
+      );
+  }
+  setSetting(YT_CLIP, null);
+  setSetting(YT_POS, null);
   setStatus(id, "played");
   s.memory = { ...s.memory, clip: null };
+  // It cut into a Spotify song (▶ Now): carry on with that song; the rest of Up
+  // Next follows it as usual.
+  if (resume) {
+    const dev = await wakeSpotify();
+    await api("PUT", "/me/player/play", undefined, { device_id: dev }).catch(() => {});
+    poke();
+    return;
+  }
+  // Another browser item next (e.g. a run of YouTube songs): play it straight away
+  // and keep Spotify waiting.
+  feedBackdrop();
+  const next = head();
+  if (next && playsInBrowser(next.kind) && hostAlive()) {
+    await startInBrowser(next.id);
+    poke();
+    return;
+  }
   // If a track is next in Up Next, hand it off before skipping so it plays now;
   // otherwise skipping resumes the playlist.
+  const dev = await wakeSpotify();
   const h = head();
-  if (h?.kind === "track" && h.uri) await handOff(h.id, h.uri);
-  await api("POST", "/me/player/next");
-  await api("PUT", "/me/player/play").catch(() => {}); // some devices stay paused after next
+  // A kiosk-playlist backdrop has no Spotify playlist to fall back on: play the
+  // next song directly.
+  if (kioskBackdrop() && h?.kind === "track" && h.uri) {
+    await playTrackDirect(h, dev);
+    poke();
+    return;
+  }
+  if (h?.kind === "track" && h.uri) await handOff(h.id, h.uri, dev);
+  await api("POST", "/me/player/next", undefined, { device_id: dev });
+  await api("PUT", "/me/player/play", undefined, { device_id: dev }).catch(() => {}); // some devices stay paused after next
   poke();
 }
 
@@ -476,11 +859,30 @@ export async function playNow(id: string) {
   const item = getItem(id);
   if (!item || item.status !== "queued") return;
   moveToFront(id);
-  if (item.kind === "clip") {
+  if (playsInBrowser(item.kind)) {
+    // Interrupting a song (not just its last moments): resume it afterwards. A
+    // browser item already playing passes its own resume point on.
+    const pb = s.playback;
+    const left = pb?.item ? pb.item.duration_ms - (pb.progress_ms ?? 0) : 0;
+    const midSong = s.memory.clip?.resume || Boolean(pb?.is_playing && left > CLIP_CUT_MS + 3000);
     await api("PUT", "/me/player/pause").catch(() => {});
-    setStatus(id, "handed_off");
-    s.memory = { ...s.memory, clip: { id, startedAt: Date.now() } };
-    if (!hostAlive()) await finishClip(id);
+    // Replacing a browser item that's already playing: it counts as played.
+    dropBrowserItem();
+    await startInBrowser(id, midSong);
+    poke();
+    return;
+  }
+  rememberPlace();
+  // A Spotify song over a YouTube song / clip: that one is over. Spotify has been
+  // sitting paused (maybe dropped its player), so play this song directly.
+  if (dropBrowserItem()) {
+    const dev = await wakeSpotify();
+    if (s.memory.handoff) {
+      setStatus(s.memory.handoff.id, "queued");
+      s.memory = { ...s.memory, handoff: null };
+    }
+    await playTrackDirect(item, dev);
+    poke();
     return;
   }
   // A track already handed off would play first; skip past it and re-queue it.
@@ -502,6 +904,7 @@ export async function playNow(id: string) {
 // for the jump, paused, then put back to the music volume.
 export async function skipToUpcoming(uri: string, index: number, paused = false) {
   const s = state();
+  s.returnTo = null;
   const ctx = s.playback?.context?.uri;
   const dev = s.playback?.device;
   const deviceId = dev?.id ?? undefined;
@@ -572,7 +975,8 @@ function duckedLevel(base: number) {
 function musicVolume(): number {
   const { musicVolume } = getSettings();
   if (musicVolume != null) return musicVolume;
-  const v = state().playback?.device?.volume_percent ?? 70;
+  // A device at 0 is a fade leftover, not a level to restore to.
+  const v = state().playback?.device?.volume_percent || 70;
   updateSettings({ musicVolume: v });
   return v;
 }
@@ -598,7 +1002,9 @@ async function volumeHousekeeping() {
     await restoreVolume();
     return;
   }
-  if (!s.duck && !isFading() && !s.transitioning && Date.now() - s.volumeSetAt > VOLUME_SYNC_QUIET_MS && dev.volume_percent !== musicVolume())
+  // Never adopt 0: an interrupted fade-out leaves the device there, and saving it
+  // would make every restore silent. Muting on purpose is the kiosk's slider.
+  if (!s.duck && !isFading() && !s.transitioning && Date.now() - s.volumeSetAt > VOLUME_SYNC_QUIET_MS && dev.volume_percent > 0 && dev.volume_percent !== musicVolume())
     updateSettings({ musicVolume: dev.volume_percent });
 }
 
@@ -695,7 +1101,8 @@ function maybeTransition(delay: number): number {
   const pb = s.playback;
   if (!ms || !pb?.item || !pb.is_playing || !pb.device?.supports_volume) return delay;
   if (s.duck || isFading() || s.transitioning || s.pausedForInstant || s.memory.clip) return delay;
-  if (head()?.kind === "clip") return delay; // the clip itself will pause the music
+  const h = head();
+  if (h && playsInBrowser(h.kind)) return delay; // the clip / YouTube song will pause the music
   const uri = pb.item.uri;
   if (s.transitionFor === uri) return delay;
   const remaining = pb.item.duration_ms - (pb.progress_ms ?? 0);
@@ -743,12 +1150,15 @@ async function runTransition(uri: string, remaining: number, ms: number) {
 // Fade the music out (then pause, and put the volume back for next time) or in
 // (from silence if paused, else from wherever it is, up to the music volume).
 // Runs in the background; on players without volume control it just pauses/plays.
-export async function fadeMusic(dir: "in" | "out"): Promise<"fading" | "instant"> {
+// cueNext (fade out only): then line up the next song, paused at its start, so ▶
+// begins it fresh.
+export async function fadeMusic(dir: "in" | "out", cueNext = false): Promise<"fading" | "instant"> {
   const s = state();
   const dev = s.playback?.device;
   const { musicFadeInMs, musicFadeOutMs } = getSettings();
   if (!dev?.supports_volume) {
     await api("PUT", dir === "out" ? "/me/player/pause" : "/me/player/play");
+    if (dir === "out" && cueNext) await cueNextPaused();
     if (dir === "out") markStopped();
     poke();
     return "instant";
@@ -762,6 +1172,7 @@ export async function fadeMusic(dir: "in" | "out"): Promise<"fading" | "instant"
       if (dir === "out") {
         if (await ramp(current, 0, musicFadeOutMs)) {
           await api("PUT", "/me/player/pause");
+          if (cueNext) await cueNextPaused();
           markStopped();
           await applyVolume(base);
         }
@@ -785,9 +1196,105 @@ export async function fadeMusic(dir: "in" | "out"): Promise<"fading" | "instant"
   return "fading";
 }
 
+// Skip to the next song (Up Next's head track first, else the playlist) and leave it
+// paused at 0:00. Spotify starts playing on `next`, so wait for the change and pause.
+// The music is silent (faded out) while this runs. A YouTube / clip head still plays
+// at the end of the cued song, as usual.
+async function cueNextPaused() {
+  const s = state();
+  const was = s.playback?.item?.uri;
+  const dev = s.playback?.device?.id ?? undefined;
+  const h = head();
+  if (h?.kind === "track" && h.uri && !s.memory.handoff) await handOff(h.id, h.uri, dev);
+  await api("POST", "/me/player/next", undefined, { device_id: dev });
+  for (const until = Date.now() + 4000; Date.now() < until; ) {
+    await new Promise((r) => setTimeout(r, 300));
+    const pb = await getPlayback().catch(() => null);
+    if (pb?.item && pb.item.uri !== was) break;
+  }
+  await api("PUT", "/me/player/pause", undefined, { device_id: dev }).catch(() => {});
+  await api("PUT", "/me/player/seek", undefined, { position_ms: "0", device_id: dev }).catch(() => {});
+}
+
+// ---- Kiosk-playlist backdrop ------------------------------------------------
+// The backdrop can be a kiosk playlist (Spotify + YouTube songs mixed). There's no
+// Spotify playlist behind it, so the engine keeps its next song waiting in Up Next
+// (source "backdrop", always after what people asked for) and the usual Up Next
+// machinery plays it: Spotify songs on Spotify, YouTube songs in the kiosk tab.
+
+const kioskBackdrop = () => kioskPlaylistId(getSettings().playlistUri);
+const blockedItem = (i: KioskPlaylistItem) => Boolean(isBlocked(i));
+const asSummary = (i: KioskPlaylistItem): TrackSummary => ({
+  uri: i.uri,
+  title: i.title,
+  subtitle: i.subtitle,
+  art: i.art,
+  durationMs: i.durationMs,
+  explicit: false,
+});
+
+function feedBackdrop(): QueueItem | null {
+  const pid = kioskBackdrop();
+  if (!pid || head()) return null;
+  const next = nextFromPlaylist(pid, blockedItem);
+  if (!next) return null;
+  state().upcomingStale = true;
+  return addItem({ ...next, source: "backdrop" });
+}
+
+// Play one of our tracks right now (no Spotify playlist behind it).
+async function playTrackDirect(item: QueueItem, deviceId?: string) {
+  const s = state();
+  setStatus(item.id, "handed_off");
+  s.memory = { ...s.memory, handoff: { id: item.id, uri: item.uri!, trackChanges: 0 } };
+  await api("PUT", "/me/player/play", { uris: [item.uri] }, { device_id: deviceId });
+}
+
+// Start a kiosk playlist as the backdrop, from the top (or a random song when
+// shuffled). `paused` loads its first song without playing it.
+export async function startKioskPlaylist(playlistId: string, deviceId: string | undefined, paused: boolean) {
+  const s = state();
+  s.returnTo = null;
+  clearBackdropItems();
+  resetCursor(playlistId);
+  // Whatever the kiosk tab is playing gives way.
+  dropBrowserItem();
+  const next = nextFromPlaylist(playlistId, blockedItem);
+  if (!next) throw new Error("That playlist is empty (or every song is on the do-not-play list).");
+  const item = addItem({ ...next, source: "backdrop" }, { atFront: true });
+  // Spotify mustn't repeat the one song we hand it, or carry on with an old playlist.
+  await api("PUT", "/me/player/repeat", undefined, { state: "off", device_id: deviceId }).catch(() => {});
+  if (item.kind === "youtube") {
+    await api("PUT", "/me/player/pause").catch(() => {});
+    if (!paused) await startInBrowser(item.id);
+  } else {
+    const mute = paused && s.playback?.device?.supports_volume;
+    if (mute) await applyVolume(0).catch(() => {});
+    try {
+      await playTrackDirect(item, deviceId);
+      if (paused) {
+        await new Promise((r) => setTimeout(r, 500));
+        await api("PUT", "/me/player/pause", undefined, { device_id: deviceId }).catch(() => {});
+        await api("PUT", "/me/player/seek", undefined, { position_ms: "0", device_id: deviceId }).catch(() => {});
+        markStopped();
+      }
+    } finally {
+      if (mute) await applyVolume(musicVolume()).catch(() => {});
+    }
+  }
+  s.upcomingStale = true;
+  poke();
+}
+
+// Who asked for an Up Next item, for the history and the event log.
+function requestInfo(it: QueueItem) {
+  return { requestedBy: it.requestedBy, dedication: it.dedication, source: it.source };
+}
+
 // Snapshot for the UI.
 export function snapshot() {
   const s = state();
+  const dnp = getSettings().doNotPlay;
   const pb = s.playback;
   return {
     error: s.error,
@@ -803,6 +1310,11 @@ export function snapshot() {
         }
       : null,
     nowPlayingItem: s.memory.nowPlayingId ? getItem(s.memory.nowPlayingId) : null,
+    // A YouTube song playing in the kiosk tab (Spotify waits paused meanwhile).
+    youtubeNow: youtubeNow(),
+    // Some kiosk tab is polling as the audio host (plays clips and YouTube songs).
+    audioHostAlive: hostAlive(),
+    youtubeHeld: Boolean(s.youtubeHeld && s.memory.clip?.id === s.youtubeHeld),
     ducked: Boolean(s.duck),
     // Belt and braces: never show a fade that has outlived any real fade.
     fading: isFading(),
@@ -810,7 +1322,9 @@ export function snapshot() {
     holdActive: holdActive(),
     resumeOffer: resumeOffer(),
     musicVolume: getSettings().musicVolume ?? pb?.device?.volume_percent ?? null,
-    upcoming: s.upcoming,
+    upcoming: s.upcoming.map((t) => (isBlocked(t, dnp) ? { ...t, blocked: true } : t)),
+    // "kiosk": the backdrop is a kiosk playlist (its upcoming songs are ours to queue).
+    backdropKind: kioskBackdrop() ? "kiosk" : "spotify",
     history: playHistory().slice(0, 30),
     errors: recentErrors().slice(0, 15),
   };

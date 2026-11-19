@@ -1,0 +1,18 @@
+{
+  // Type-checks the Worker (src/server/worker.ts and everything it imports) against
+  // the Workers runtime types; the main tsconfig covers the Next.js UI.
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["esnext"],
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "isolatedModules": true,
+    "esModuleInterop": true,
+    "types": ["@cloudflare/workers-types", "node"],
+    "paths": { "@/*": ["./src/*"], "next/server": ["./src/server/next-shim.ts"] }
+  },
+  "files": ["src/server/worker.ts"]
+}
