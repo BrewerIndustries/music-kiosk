@@ -13,6 +13,7 @@ import * as kioskPlaylists from "./routes/kiosk-playlists/route";
 import * as kioskPlaylist from "./routes/kiosk-playlists/[id]/route";
 import * as event from "./routes/event/[action]/route";
 import * as importData from "./routes/import/route";
+import * as sync from "./routes/sync/route";
 import * as player from "./routes/player/route";
 import * as playlists from "./routes/playlists/route";
 import * as qr from "./routes/qr/route";
@@ -47,6 +48,7 @@ const table: [string, unknown][] = [
   ["/api/guest/request", guestRequest],
   ["/api/guest/search", guestSearch],
   ["/api/import", importData],
+  ["/api/sync", sync],
   ["/api/player", player],
   ["/api/playlists", playlists],
   ["/api/qr", qr],
