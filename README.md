@@ -316,6 +316,20 @@ KIOSK_EMAIL=… KIOSK_PASSWORD=… node scripts/import-local.mjs \
   --db ../music-kiosk/data/kiosk.db --url https://musickiosk-dev.dabrewer.dev
 ```
 
+**Copying one deployed kiosk into another** (default dev → prod; first run
+2026-11-19): `GET`/`POST /api/sync`, guarded by a bearer `SYNC_TOKEN` secret that both
+Workers share (no `SYNC_TOKEN` → the route 404s). It copies the import allow-list plus
+the YouTube (`google_`) sign-in, replaces the kiosk playlists wholesale, and adds users
+whose email is new. Play history (`plays`) and the queue stay behind. With the sign-ins
+copied, dev and prod drive the same Spotify/YouTube accounts — don't play on both.
+
+```bash
+SYNC_TOKEN=… node scripts/sync-kiosk.mjs [--from URL] [--to URL] [--no-spotify] [--dry-run]
+```
+
+After a deploy the Durable Object can keep serving the old code for a few minutes (it
+took ~5 min on prod), so a fresh route can 404 at first.
+
 ## Workflow ⚠️
 
 Work on `dev`. Promote to `main` only via a PR the user approves.
